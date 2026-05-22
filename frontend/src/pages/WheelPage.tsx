@@ -8,6 +8,7 @@ export default function WheelPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [lastSpin, setLastSpin] = useState<Spin | null>(null);
   const [spinning, setSpinning] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [winnerIndex, setWinnerIndex] = useState(0);
   const [result, setResult] = useState<Attendee | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -52,19 +53,21 @@ export default function WheelPage() {
     if (eligibleAttendees.length === 0) return;
     setError(null);
     setResult(null);
+    setSubmitting(true);
     const idx = Math.floor(Math.random() * eligibleAttendees.length);
-    setWinnerIndex(idx);
-    setSpinning(true);
     try {
       const winner = eligibleAttendees[idx];
-      const spin = await api.post<Spin>('/spins', {
+      const spinResp = await api.post<Spin>('/spins', {
         selectedAttendeeId: winner.attendeeId,
         eligibleAttendeeIds: eligibleAttendees.map((a) => a.attendeeId),
       });
-      setLastSpin(spin);
+      setLastSpin(spinResp);
+      setWinnerIndex(idx);
+      setSpinning(true);
     } catch (err) {
-      setSpinning(false);
       setError(err instanceof Error ? err.message : 'Spin failed');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -108,10 +111,10 @@ export default function WheelPage() {
         </div>
         <button
           onClick={spin}
-          disabled={spinning || eligibleAttendees.length === 0}
+          disabled={submitting || spinning || eligibleAttendees.length === 0}
           className="btn-primary mt-5 px-6"
         >
-          {spinning ? 'Spinning…' : 'Official spin'}
+          {submitting ? 'Recording…' : spinning ? 'Spinning…' : 'Official spin'}
         </button>
         {result && !spinning && (
           <div className="mt-4 text-lg font-serif">

@@ -283,7 +283,21 @@ function formatThursday(d: Date): string {
 }
 
 function toISODate(d: Date): string {
-  return d.toISOString().slice(0, 10);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function validateDraft(draft: TopicDraft): string | null {
+  if (!draft.topicType) return null;
+  if (draft.topicType === 'reading' && (!draft.book || !draft.chapter)) {
+    return 'Pick a book and chapter for the reading.';
+  }
+  if (draft.topicType === 'presentation' && !draft.topicText.trim()) {
+    return 'Enter a presentation topic.';
+  }
+  return null;
 }
 
 function MeetingsTab() {
@@ -298,7 +312,7 @@ function MeetingsTab() {
   const refresh = () => {
     Promise.all([api.get<Attendee[]>('/attendees'), api.get<Meeting[]>('/meetings')])
       .then(([att, meet]) => {
-        setAttendees(att.filter((a) => a.active));
+        setAttendees(att);
         setMeetings(meet);
       })
       .catch((e) => setError(e.message));
@@ -311,6 +325,11 @@ function MeetingsTab() {
     setRecordTopic(draftFromMeeting(existing));
   }, [date, meetings]);
 
+  const visibleAttendees = useMemo(
+    () => attendees.filter((a) => a.active || presentIds.has(a.attendeeId)),
+    [attendees, presentIds]
+  );
+
   const togglePresent = (id: string) => {
     const next = new Set(presentIds);
     if (next.has(id)) next.delete(id);
@@ -318,14 +337,27 @@ function MeetingsTab() {
     setPresentIds(next);
   };
 
-  const saveUpcoming = async (forDate: string, draft: TopicDraft) => {
+  const saveUpcomingMany = async (
+    entries: Array<{ date: string; draft: TopicDraft }>
+  ): Promise<boolean> => {
+    for (const { draft } of entries) {
+      const msg = validateDraft(draft);
+      if (msg) {
+        setError(msg);
+        return false;
+      }
+    }
     setError(null);
     setBusy(true);
     try {
-      await api.post('/meetings', { date: forDate, ...buildTopicBody(draft) });
+      for (const { date: d, draft } of entries) {
+        await api.post('/meetings', { date: d, ...buildTopicBody(draft) });
+      }
       refresh();
+      return true;
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Save failed');
+      return false;
     } finally {
       setBusy(false);
     }
@@ -333,6 +365,11 @@ function MeetingsTab() {
 
   const submit = async () => {
     if (!date) return;
+    const msg = validateDraft(recordTopic);
+    if (msg) {
+      setError(msg);
+      return;
+    }
     setError(null);
     setBusy(true);
     try {
@@ -351,7 +388,7 @@ function MeetingsTab() {
 
   return (
     <div className="space-y-5">
-      <UpcomingMeetings meetings={meetings} onSave={saveUpcoming} busy={busy} />
+      <UpcomingMeetings meetings={meetings} onSaveAll={saveUpcomingMany} busy={busy} />
 
       <div className="card p-5">
         <h2 className="text-lg font-semibold mb-3">Record meeting attendance</h2>
@@ -372,8 +409,13 @@ function MeetingsTab() {
           <div>
             <label className="text-sm font-medium text-woodland-muted block mb-2">Attended:</label>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {attendees.map((a) => (
-                <label key={a.attendeeId} className="flex items-center gap-2 text-sm">
+              {visibleAttendees.map((a) => (
+                <label
+                  key={a.attendeeId}
+                  className={`flex items-center gap-2 text-sm ${
+                    a.active ? '' : 'text-woodland-subtle italic'
+                  }`}
+                >
                   <input
                     type="checkbox"
                     checked={presentIds.has(a.attendeeId)}
@@ -381,6 +423,7 @@ function MeetingsTab() {
                     className="accent-woodland-primary"
                   />
                   {a.name}
+                  {!a.active && <span className="text-xs">(inactive)</span>}
                 </label>
               ))}
             </div>
@@ -421,11 +464,11 @@ function MeetingsTab() {
 
 function UpcomingMeetings({
   meetings,
-  onSave,
+  onSaveAll,
   busy,
 }: {
   meetings: Meeting[];
-  onSave: (date: string, draft: TopicDraft) => Promise<void>;
+  onSaveAll: (entries: Array<{ date: string; draft: TopicDraft }>) => Promise<boolean>;
   busy: boolean;
 }) {
   const thursdays = useMemo(() => {
@@ -438,15 +481,43 @@ function UpcomingMeetings({
   }, []);
 
   const [drafts, setDrafts] = useState<Record<string, TopicDraft>>({});
+  const [dirty, setDirty] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    const next: Record<string, TopicDraft> = {};
-    for (const thu of thursdays) {
-      const key = toISODate(thu);
-      next[key] = draftFromMeeting(meetings.find((m) => m.date === key));
-    }
-    setDrafts(next);
+    setDrafts((prev) => {
+      const next: Record<string, TopicDraft> = {};
+      for (const thu of thursdays) {
+        const key = toISODate(thu);
+        // Preserve in-progress edits so saving one row doesn't wipe siblings on refresh.
+        next[key] = dirty.has(key) && key in prev
+          ? prev[key]
+          : draftFromMeeting(meetings.find((m) => m.date === key));
+      }
+      return next;
+    });
+    // `dirty` is intentionally excluded: it's read via the current closure and including
+    // it would reseed (and re-render) on every keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [meetings, thursdays]);
+
+  const updateDraft = (key: string, next: TopicDraft) => {
+    setDrafts((prev) => ({ ...prev, [key]: next }));
+    setDirty((prev) => {
+      if (prev.has(key)) return prev;
+      const s = new Set(prev);
+      s.add(key);
+      return s;
+    });
+  };
+
+  const saveAll = async () => {
+    const entries = Array.from(dirty)
+      .map((key) => ({ date: key, draft: drafts[key] }))
+      .filter((e) => e.draft);
+    if (entries.length === 0) return;
+    const ok = await onSaveAll(entries);
+    if (ok) setDirty(new Set());
+  };
 
   return (
     <div className="card">
@@ -461,31 +532,44 @@ function UpcomingMeetings({
         {thursdays.map((thu) => {
           const dateStr = toISODate(thu);
           const draft = drafts[dateStr] ?? emptyDraft();
+          const isDirty = dirty.has(dateStr);
           return (
             <li key={dateStr} className="px-5 py-4 border-t border-woodland-border">
               <div className="flex items-start gap-4 flex-wrap">
                 <div className="min-w-[150px] pt-1">
                   <div className="text-sm font-medium">Week of {formatThursday(thu)}</div>
-                  <div className="text-xs text-woodland-muted">{dateStr}</div>
+                  <div className="text-xs text-woodland-muted">
+                    {dateStr}
+                    {isDirty && (
+                      <span className="ml-2 text-woodland-accent">• unsaved</span>
+                    )}
+                  </div>
                 </div>
                 <div className="flex-1 min-w-[260px]">
                   <TopicEditor
                     value={draft}
-                    onChange={(next) => setDrafts((prev) => ({ ...prev, [dateStr]: next }))}
+                    onChange={(next) => updateDraft(dateStr, next)}
                   />
                 </div>
-                <button
-                  onClick={() => onSave(dateStr, draft)}
-                  disabled={busy}
-                  className="btn-primary py-1.5 self-start"
-                >
-                  Save
-                </button>
               </div>
             </li>
           );
         })}
       </ul>
+      <div className="px-5 py-4 border-t border-woodland-border flex items-center justify-end gap-3">
+        <span className="text-xs text-woodland-muted">
+          {dirty.size === 0
+            ? 'No changes'
+            : `${dirty.size} unsaved change${dirty.size === 1 ? '' : 's'}`}
+        </span>
+        <button
+          onClick={saveAll}
+          disabled={busy || dirty.size === 0}
+          className="btn-primary py-1.5"
+        >
+          Save changes
+        </button>
+      </div>
     </div>
   );
 }

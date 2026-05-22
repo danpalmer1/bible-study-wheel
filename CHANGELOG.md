@@ -9,6 +9,13 @@ Versioning is loose pre-1.0 — minor versions may include breaking changes.
 
 _Add new entries here as work lands; promote to a versioned section when shipping._
 
+### Fixed
+- Admin → Meetings → Upcoming meetings: editing multiple weeks and saving no longer wipes the unsaved siblings. Per-row Save replaced with a single centralized **Save changes** button; a `dirty` set tracks edited rows so the post-save refresh only reseeds untouched ones. Each row now shows a "• unsaved" hint and the footer reports the unsaved-change count.
+- `toISODate` was converting dates via `toISOString()`, which is UTC. This shifted the "today" default in Record meeting (US evening → next day's date) and, for UTC+ timezones, mis-labeled the generated Thursdays. Now uses local `getFullYear/getMonth/getDate`.
+- Inactive attendees who were marked present on an existing meeting were invisible in the Record form — admins couldn't uncheck them. The form now shows active attendees plus any inactive ones currently in the meeting's roster, rendered italic with an "(inactive)" tag.
+- Topic completeness is validated before save: Reading requires book + chapter, Presentation requires non-empty text. Incomplete drafts no longer round-trip to the server and back as "No topic".
+- Wheel page: the spin animation could get stuck on `mustStartSpinning={true}` if the `/spins` POST failed or `onStopSpinning` never fired. The POST now runs first; the wheel only starts after the spin is recorded. New "Recording…" button state covers the round-trip.
+
 ---
 
 ## [0.4.0] — 2026-05-22 — Weekly reading verse + meeting topics
