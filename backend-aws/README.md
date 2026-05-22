@@ -18,18 +18,25 @@ functions/
 └── shared/         helpers.js — DDB doc client, ok/err, claim/group helpers
 ```
 
-## ⚠️ Auth integration is **not wired up yet**
+## Auth integration
 
-The frontend's `AuthContext` calls `/api/auth/login`, `/api/auth/me`, and `/api/auth/signup` and stores a JWT in `localStorage`. None of those endpoints exist in `backend-aws` — the AWS deployment expects Cognito JWTs minted by Cognito itself.
+The frontend supports **two backends** selected at build time via `VITE_USE_AMPLIFY`:
 
-Before this app can ship to AWS, pick one of:
+- `false` (default) → talks to `backend-local`'s Express `/auth/*` routes with a Bearer-token JWT stored in `localStorage`.
+- `true` → uses Amplify v6 (`aws-amplify/auth`) to sign in/up against Cognito directly; the API client pulls a fresh Cognito ID token via `fetchAuthSession()` for every request.
 
-- **(Recommended) Replace `AuthContext` with Amplify Auth** — use `aws-amplify`'s `Auth.signIn`, `Auth.currentAuthenticatedUser`, and `Auth.signUp`. The current `api/client.ts` Bearer-token wiring stays; just swap how the token is obtained (`(await Auth.currentSession()).getIdToken().getJwtToken()`). The PreSignUp trigger already prevents auto-confirmation, so the existing "pending → approve" flow still works through `adminUsers`.
-- **Add `/auth/*` Lambdas** that wrap `AdminInitiateAuth` / `SignUp` / `GetUser`. Heavier, and means storing/refreshing tokens manually. Only worth it if the frontend cannot pull in Amplify.
+Flow on AWS:
 
-Until one of these is in place, **the deployed app will not be able to log in**, even though every other endpoint works.
+1. User signs up via the app — Cognito creates an **UNCONFIRMED** user.
+2. `preSignup` trigger sets `autoVerifyEmail=true` (suppresses the code-email Cognito would otherwise send) but leaves `autoConfirmUser=false`, and SES-notifies the admin.
+3. User attempts to log in → Cognito throws `UserNotConfirmedException` → frontend displays *"Account not yet approved by admin"* (same message as the local Express path).
+4. Admin signs in, opens Admin → Pending users, clicks **Approve** → `adminUsers` Lambda calls `AdminConfirmSignUp` + `AdminAddUserToGroup(member)` → user can log in.
+
+The frontend bundle dynamically imports `aws-amplify` only when `VITE_USE_AMPLIFY=true`, so local-dev builds don't pay the size cost.
 
 ## Prereqs
+
+> **First time on AWS?** Start with [`AWS_SETUP.md`](./AWS_SETUP.md) — it covers account creation, IAM user, AWS CLI, SES sender verification, and `amplify configure`. Come back here once `aws sts get-caller-identity` works.
 
 ```
 npm install -g @aws-amplify/cli

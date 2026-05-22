@@ -9,6 +9,19 @@ Versioning is loose pre-1.0 — minor versions may include breaking changes.
 
 _Add new entries here as work lands; promote to a versioned section when shipping._
 
+### Added
+- **AWS deploy path is now wired.** Frontend has a dual-mode auth selector via `VITE_USE_AMPLIFY`:
+  - `false` (default) — keeps the existing local Express `/auth/*` + Bearer-JWT flow.
+  - `true` — uses Amplify v6 (`aws-amplify/auth`) for sign in/up/out; the API client pulls a fresh Cognito ID token via `fetchAuthSession()` per request.
+- `frontend/src/aws-amplify-init.ts` — configures Amplify from env vars (`VITE_COGNITO_USER_POOL_ID`, `VITE_COGNITO_USER_POOL_CLIENT_ID`) so the gitignored `aws-exports.js` doesn't need to exist at build time. Dynamic-imported so local builds tree-shake Amplify out entirely (production bundle stays at ~88 kB gzipped).
+- `frontend/.env.example` — documents the two env vars + `VITE_API_URL`.
+- `backend-aws/AWS_SETUP.md` — first-time AWS portal walkthrough: account creation, root MFA, IAM admin user, billing alarm, AWS CLI configure, SES sender verification, Amplify CLI configure. Everything you need before running `amplify init`.
+
+### Changed
+- `backend-aws/functions/preSignup/index.js` — sets `autoVerifyEmail=true` so Cognito doesn't send the self-confirmation code email that would let users bypass the admin-approval gate. Combined with `autoConfirmUser=false`, users stay UNCONFIRMED until an admin clicks Approve.
+- `backend-aws/README.md` — auth-integration section rewritten to describe the wired-up flow instead of the gap.
+- `frontend/tsconfig.json` — added `"types": ["vite/client"]` so `import.meta.env` typechecks.
+
 ### Fixed
 - Admin → Meetings → Upcoming meetings: editing multiple weeks and saving no longer wipes the unsaved siblings. Per-row Save replaced with a single centralized **Save changes** button; a `dirty` set tracks edited rows so the post-save refresh only reseeds untouched ones. Each row now shows a "• unsaved" hint and the footer reports the unsaved-change count.
 - `toISODate` was converting dates via `toISOString()`, which is UTC. This shifted the "today" default in Record meeting (US evening → next day's date) and, for UTC+ timezones, mis-labeled the generated Thursdays. Now uses local `getFullYear/getMonth/getDate`.

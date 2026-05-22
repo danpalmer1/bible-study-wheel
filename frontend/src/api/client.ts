@@ -1,16 +1,33 @@
-const BASE = '/api';
+const USE_AMPLIFY = import.meta.env.VITE_USE_AMPLIFY === 'true';
+const BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? '/api';
 
 function getToken(): string | null {
   return localStorage.getItem('token');
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function getAuthHeader(): Promise<Record<string, string>> {
+  if (USE_AMPLIFY) {
+    try {
+      const { fetchAuthSession } = await import('aws-amplify/auth');
+      const session = await fetchAuthSession();
+      const idToken = session.tokens?.idToken?.toString();
+      // API Gateway Cognito User Pool authorizer expects the raw JWT, no Bearer prefix.
+      return idToken ? { Authorization: idToken } : {};
+    } catch {
+      return {};
+    }
+  }
   const token = getToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const authHeader = await getAuthHeader();
   const res = await fetch(`${BASE}${path}`, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...authHeader,
       ...(init.headers || {}),
     },
   });
