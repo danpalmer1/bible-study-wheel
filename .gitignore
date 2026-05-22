@@ -3,9 +3,12 @@ dist/
 build/
 .env
 .env.local
+.env.production
 *.log
 .DS_Store
 db.json
-amplify/
+
+# Amplify Gen 2 — amplify/ source IS checked in. Only build artifacts ignored.
 .amplify/
-aws-exports.js
+amplify_outputs.json
+amplifyconfiguration.json

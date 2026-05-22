@@ -1,156 +1,141 @@
-# First-time AWS setup
+# First-time AWS setup (Amplify Gen 2)
 
-Walks a brand-new AWS user from "I don't have an account" to "ready to run `amplify init`." Estimated 30–45 min.
+Walks a brand-new AWS user from "I don't have an account" to "ready to run `npx ampx sandbox`." Estimated 20–30 min — Gen 2 has less ceremony than Gen 1 (no `amplify configure`, no separate IAM user for Amplify).
 
-Cost note: every service in this stack has a generous free tier (Cognito, DynamoDB, Lambda, API Gateway, SES, Amplify Hosting). For a small Bible-study app the monthly bill should round to **$0** for the first 12 months and stay under a few dollars after. Set up a billing alarm anyway (step 4).
+Cost note: every service in this stack has a generous free tier (Cognito, DynamoDB, Lambda, API Gateway, SES, Amplify Hosting). Expected monthly bill: ~$0 for the first year, a few dollars after. Set up a billing alarm anyway (step 4).
 
 ---
 
 ## 1. Create an AWS account
 
 1. Go to <https://aws.amazon.com/> → **Create an AWS Account**.
-2. Enter email, account name (e.g. `dan-personal`), password.
-3. Pick **Personal** account type.
-4. Add a credit card (required even for free tier).
-5. Phone verification, then pick **Basic Support — Free**.
+2. Email, account name (e.g. `dan-personal`), password.
+3. Personal account, add a credit card (required even for free tier).
+4. Phone verification, then pick **Basic Support — Free**.
 
-You're now signed in as the **root user**. The root user has unrestricted access and should be used as little as possible.
+You're now signed in as the **root user**. Use it as little as possible.
 
-## 2. Lock down the root user (do this FIRST)
+## 2. Lock down the root user
 
-In the AWS console, top-right account menu → **Security credentials**:
+Top-right account menu → **Security credentials**:
 
-1. **Enable MFA** on the root user. Authenticator app (Authy, 1Password, Google Authenticator) is fine.
-2. Do **not** create access keys on the root user. We'll create a separate IAM user for daily work.
+1. **Enable MFA** on root (authenticator app: Authy, 1Password, etc.).
+2. Do **not** create access keys on root. We'll use a separate IAM user for daily work.
 
-## 3. Create an IAM admin user for daily work
+## 3. Create an IAM admin user
 
-Console search bar → **IAM** → **Users** → **Create user**.
+Console search → **IAM** → **Users** → **Create user**.
 
-1. User name: `dan-admin` (or similar).
-2. Check **Provide user access to the AWS Management Console**.
-3. Console password: auto-generated, **uncheck** "must create a new password at next sign-in" if it's just you.
-4. **Next** → Permissions → **Attach policies directly** → search and check **`AdministratorAccess`**.
+1. User name: `dan-admin`.
+2. ✅ **Provide user access to the AWS Management Console**.
+3. Console password: auto-generated; uncheck "must reset at next sign-in" for solo use.
+4. **Next** → **Attach policies directly** → check **`AdministratorAccess`**.
 5. **Next** → **Create user**. Download the `.csv` with the sign-in URL.
-6. Sign out of the root account. Sign back in via the IAM sign-in URL with the new user.
-7. From this user's **Security credentials** tab: enable MFA here too, then **Create access key** → "Command Line Interface (CLI)" → save the Access key ID + Secret access key somewhere safe (a password manager). You'll paste these into `aws configure` next.
+6. Sign out of root. Sign back in via the IAM URL as the new user.
+7. From this user's **Security credentials** tab: enable MFA, then **Create access key** → **Command Line Interface (CLI)** → save the Access key ID + Secret access key (password manager).
 
-> Production-quality alternative: use **IAM Identity Center** (formerly AWS SSO) instead of long-lived access keys. For a solo hobby project, an IAM user with MFA is fine.
+## 4. Billing alarm
 
-## 4. Set up a billing alarm
+**Billing and Cost Management** → **Budgets** → **Create budget**:
+- Cost budget, **$5/month**, email alert at 80%.
 
-Console → **Billing and Cost Management** → **Budgets** → **Create budget**.
+## 5. Install AWS CLI and configure credentials
 
-- Budget type: **Cost budget**.
-- Amount: **$5/month** (adjust to taste).
-- Email alert at 80% of budget.
-
-If anything goes wrong this catches it before it gets expensive.
-
-## 5. Install the AWS CLI and configure credentials
-
-Windows installer: <https://awscli.amazonaws.com/AWSCLIV2.msi>. After install, in a fresh PowerShell:
+Installer: <https://awscli.amazonaws.com/AWSCLIV2.msi>. New PowerShell:
 
 ```pwsh
 aws --version              # verify install
 aws configure              # paste the access key + secret from step 3
 ```
 
-Region prompt: **`us-east-1`** is the safest default (every service is available, SES sandbox limits are friendliest, most tutorials assume it). Output format: `json`.
+Region: **`us-east-1`** is the safest default. Output: `json`.
 
-Verify it worked:
+Verify:
 
 ```pwsh
 aws sts get-caller-identity
 ```
 
-You should see your IAM user ARN.
+You should see your IAM user ARN. **This is all the auth Amplify Gen 2 needs** — no `amplify configure` step.
 
-## 6. Verify a sender email in SES
+## 6. Verify a sender email in SES (optional)
 
-The `preSignup` Lambda sends "new signup awaiting approval" emails. SES in a new account is in **sandbox mode** — you can only send **from** and **to** addresses you've verified.
+The `preSignUpTrigger` Lambda can optionally email you when someone signs up. Skip this section if you don't want notifications — the gate still works without it. To enable:
 
-Console → **Amazon SES** → make sure the region selector (top-right) is **us-east-1** → **Identities** → **Create identity**:
+Console → **Amazon SES** → region selector top-right = **us-east-1** → **Identities** → **Create identity**:
 
-1. Identity type: **Email address**.
-2. Enter the address you want notifications **from** (e.g. your gmail). Click **Create identity**.
-3. Check that inbox, click the AWS verification link.
-4. Repeat for the address you want notifications sent **to** (likely the same one).
+1. **Email address**, your gmail/etc., **Create identity**.
+2. Click the link AWS emails you.
 
-Both addresses now show **Verified**. You can stay in sandbox mode forever for this app — there's only one recipient (you).
+After your first sandbox deploy, set `ADMIN_NOTIFY_EMAIL` and `FROM_EMAIL` env vars on the `preSignUpTrigger` Lambda in the console.
 
-> If you ever want to send to addresses you haven't verified, request **production access** in SES. Not needed here.
-
-## 7. Install the Amplify CLI
+## 7. Sanity check
 
 ```pwsh
-npm install -g @aws-amplify/cli
-amplify --version
+aws s3 ls                  # empty bucket list, confirms creds work
+node --version             # need 18+
 ```
 
-Then:
-
-```pwsh
-amplify configure
-```
-
-This walks you through creating a **second IAM user** dedicated to Amplify (separate from the admin user). When the browser opens:
-
-1. Sign in with the `dan-admin` user from step 3 (not root).
-2. Region: same as before (`us-east-1`).
-3. Suggested user name: `amplify-dev` (or accept default).
-4. The console opens with the IAM user creation form pre-filled — click through.
-5. Back in the terminal, paste the new user's access key + secret.
-6. Profile name: `default` is fine, or `amplify-dev` if you want to keep it separate.
-
-You now have two AWS profiles in `~/.aws/credentials`. Amplify will use the one you specified.
-
-## 8. Sanity check
-
-```pwsh
-aws s3 ls                  # should return empty (no buckets yet) — confirms creds work
-amplify --help             # confirms Amplify CLI is on PATH
-```
-
-If both work, you're ready to deploy. From the project root:
+Then from the project root:
 
 ```pwsh
 cd C:\Users\danpa\Documents\Coding\Web\bible-study-wheel
-amplify init               # then follow backend-aws/README.md
+npm install                # installs Gen 2 deps from root package.json
+npx ampx sandbox           # provisions your personal dev stack
 ```
+
+`npx ampx sandbox` will:
+- Bootstrap CDK in your AWS account (first time only — takes ~3 min).
+- Synthesize CloudFormation from `amplify/backend.ts`.
+- Deploy auth + 3 DDB tables + 6 Lambdas + API Gateway.
+- Write `amplify_outputs.json` at the repo root.
+- Keep watching `amplify/` for hot-redeploy.
+
+Leave it running. In a second terminal:
+
+```pwsh
+npm run sync-config        # copies amplify_outputs values into frontend/.env.local
+cd frontend
+npm run dev                # opens at http://localhost:5173, talking to AWS
+```
+
+## 8. Bootstrap yourself as admin (one-time)
+
+The PreSignUp trigger leaves new users in UNCONFIRMED state until an admin approves. You don't have an admin yet, so:
+
+1. Sign up via the app UI (`http://localhost:5173/signup`).
+2. From PowerShell:
+
+```pwsh
+$POOL_ID = (Get-Content amplify_outputs.json | ConvertFrom-Json).auth.user_pool_id
+aws cognito-idp admin-confirm-sign-up `
+  --user-pool-id $POOL_ID `
+  --username your-email@example.com
+aws cognito-idp admin-add-user-to-group `
+  --user-pool-id $POOL_ID `
+  --username your-email@example.com `
+  --group-name admin
+```
+
+3. Refresh the app and log in. You should see Admin in the nav. Subsequent users go through the in-app Approve/Reject flow.
 
 ---
 
-## What you'll do AFTER this guide (handled by `backend-aws/README.md`)
+## Production deploy (later)
 
-1. `amplify init` — sets up the local Amplify project, generates `amplify/` and `aws-exports.js`.
-2. `amplify add auth` — Cognito user pool with `admin` + `member` groups, preSignup trigger wired up.
-3. `amplify add api` — API Gateway + Lambdas for `/attendees`, `/spins`, `/meetings`, `/stats`, `/users`, `/verse`.
-4. `amplify add storage` — three DynamoDB tables.
-5. `amplify push` — provisions everything in AWS. Generates `frontend/src/aws-exports.js`.
-6. Copy the API endpoint out of `aws-exports.js` into `frontend/.env.production`:
-   ```
-   VITE_USE_AMPLIFY=true
-   VITE_API_URL=https://xxxxxxxxxx.execute-api.us-east-1.amazonaws.com/dev
-   ```
-7. Bootstrap yourself as admin (one-time):
-   ```pwsh
-   # Sign up via the app's UI first (creates an UNCONFIRMED Cognito user)
-   aws cognito-idp admin-confirm-sign-up `
-     --user-pool-id <pool-id-from-aws-exports.js> `
-     --username your-email@example.com
-   aws cognito-idp admin-add-user-to-group `
-     --user-pool-id <pool-id> `
-     --username your-email@example.com `
-     --group-name admin
-   ```
-8. `amplify add hosting` → `amplify publish` — deploys the built frontend.
+Once the sandbox flow works end-to-end:
+
+1. Push your code to GitHub (already done).
+2. AWS Console → **Amplify** → **Create new app** → **Host web app** → connect to your GitHub repo.
+3. Build settings: Amplify auto-detects Gen 2 via `amplify/backend.ts`. Confirm the build spec runs `npm ci && npx ampx pipeline-deploy --branch <branch>` then builds `frontend/`.
+4. First build provisions a fresh prod stack alongside your sandbox; `amplify_outputs.json` is regenerated server-side and frontend build picks it up.
 
 ---
 
 ## Troubleshooting
 
-- **`amplify push` hangs or fails partway** — `amplify status` shows what's deployed. `amplify push --force` re-tries. If a CloudFormation stack is wedged, delete it in the **CloudFormation** console then `amplify pull` to resync.
-- **"Email address is not verified" in CloudWatch logs for preSignup** — you skipped step 6, or the `FROM_EMAIL` env var on the Lambda doesn't match a verified SES identity in the right region.
-- **Browser shows CORS errors after deploy** — API Gateway needs CORS enabled per route. The shared helper already returns `Access-Control-Allow-Origin: *`, but you also need to enable CORS on the API Gateway side during `amplify add api` (it asks).
-- **"User is not authorized to perform: cognito-idp:AdminConfirmSignUp"** — the `adminUsers` Lambda's execution role needs Cognito permissions. Edit the auto-generated IAM role in the IAM console and attach `AmazonCognitoPowerUser` (or write a tighter inline policy).
+- **`npx ampx sandbox` fails with bootstrap error** → run `npx cdk bootstrap aws://<account-id>/us-east-1` manually once.
+- **"User is not authorized to perform: sts:AssumeRole"** → your IAM user is missing `AdministratorAccess`. Re-attach in IAM console.
+- **`npm run sync-config` says file missing** → sandbox hasn't finished. Watch the first terminal for "Deployment completed."
+- **Frontend logs `[amplify] VITE_USE_AMPLIFY=true but ...`** → you forgot to run `npm run sync-config`, or you're running the frontend without restarting after env var changes.
+- **CloudWatch shows the preSignUp Lambda erroring on SES** → either set `ADMIN_NOTIFY_EMAIL` to a verified address or unset it entirely (handler skips SES when unset).

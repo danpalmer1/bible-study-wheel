@@ -1,142 +1,89 @@
 # backend-aws
 
-Lambda source for the AWS deployment. Mirrors the local Express routes but targets DynamoDB + Cognito instead of the JSON store.
+Lambda handler source for the AWS deployment. **Provisioning lives in [`../amplify/`](../amplify/)** (Amplify Gen 2 + CDK). This directory is just the handler code that Gen 2 bundles and deploys.
 
-> Spec last refreshed **2026-05-22** against frontend ≥0.4.0 (verse banner + meeting topics).
+> Spec last refreshed **2026-05-22** for the Amplify Gen 2 migration (0.5.x).
 
-## What's here
+## Layout
 
 ```
 functions/
-├── attendees/      GET, POST, PUT  /attendees[/{id}]
-├── meetings/       GET, POST, DELETE /meetings[/{id}]     (upsert by date)
+├── attendees/      GET, POST /attendees;  PUT /attendees/{id}
+├── meetings/       GET, POST /meetings;   DELETE /meetings/{id}     (upsert by date)
 ├── spins/          GET /spins/latest, POST /spins
 ├── stats/          GET /stats
-├── verse/          GET /verse                              (public, no auth)
+├── verse/          GET /verse                                       (public, no auth)
 ├── adminUsers/     GET /users/pending, POST /users/{id}/approve|reject
-├── preSignup/      Cognito PreSignUp trigger (admin SES notification)
+├── preSignup/      Cognito PreSignUp trigger (autoVerifyEmail + admin SES notify)
 └── shared/         helpers.js — DDB doc client, ok/err, claim/group helpers
 ```
 
-## Auth integration
+Each handler is plain CommonJS (`exports.handler = ...`). `amplify/functions/<name>/resource.ts` references the file via `defineFunction({ entry: '../../../backend-aws/functions/<name>/index.js' })`, so this is the **single source of truth** for handler code — there's no duplication between the local Express path and the AWS path.
 
-The frontend supports **two backends** selected at build time via `VITE_USE_AMPLIFY`:
+## Deploying
 
-- `false` (default) → talks to `backend-local`'s Express `/auth/*` routes with a Bearer-token JWT stored in `localStorage`.
-- `true` → uses Amplify v6 (`aws-amplify/auth`) to sign in/up against Cognito directly; the API client pulls a fresh Cognito ID token via `fetchAuthSession()` for every request.
+See [`AWS_SETUP.md`](./AWS_SETUP.md) for first-time AWS account + CLI setup. Once `aws sts get-caller-identity` works:
 
-Flow on AWS:
-
-1. User signs up via the app — Cognito creates an **UNCONFIRMED** user.
-2. `preSignup` trigger sets `autoVerifyEmail=true` (suppresses the code-email Cognito would otherwise send) but leaves `autoConfirmUser=false`, and SES-notifies the admin.
-3. User attempts to log in → Cognito throws `UserNotConfirmedException` → frontend displays *"Account not yet approved by admin"* (same message as the local Express path).
-4. Admin signs in, opens Admin → Pending users, clicks **Approve** → `adminUsers` Lambda calls `AdminConfirmSignUp` + `AdminAddUserToGroup(member)` → user can log in.
-
-The frontend bundle dynamically imports `aws-amplify` only when `VITE_USE_AMPLIFY=true`, so local-dev builds don't pay the size cost.
-
-## Prereqs
-
-> **First time on AWS?** Start with [`AWS_SETUP.md`](./AWS_SETUP.md) — it covers account creation, IAM user, AWS CLI, SES sender verification, and `amplify configure`. Come back here once `aws sts get-caller-identity` works.
-
-```
-npm install -g @aws-amplify/cli
-amplify configure
+```pwsh
+cd <project root>
+npm install
+npx ampx sandbox             # provisions your personal dev stack, watches amplify/
+npm run sync-config          # copies amplify_outputs.json values into frontend/.env.local
+cd frontend && npm run dev   # frontend points at AWS
 ```
 
-All Lambdas target **Node.js 18+** (`verse/index.js` uses global `fetch`).
+`npx ampx sandbox` reads [`amplify/backend.ts`](../amplify/backend.ts) and provisions:
 
-## Deploy with Amplify
+- **Cognito user pool** with `admin` and `member` groups, `preSignUpTrigger` attached.
+- **3 DynamoDB tables** (Attendees, Meetings, Spins, on-demand billing, single string PK each).
+- **6 Lambdas** wrapping the handlers in this directory.
+- **API Gateway REST API** with a Cognito User Pools authorizer on every route except `GET /verse`.
+- IAM grants — least-privilege per Lambda (e.g. `meetings` gets read-only on `attendees` for ID validation; `verse` only gets read on `meetings`).
 
-From the project root:
+## Auth flow
 
-```bash
-amplify init
+The frontend supports two backends via `VITE_USE_AMPLIFY`:
 
-amplify add auth
-# - Default config with social provider: No
-# - Users sign in with: Email
-# - Add user pool groups: Yes -> "admin", "member"
-# - Add admin queries API: No
-# - Multifactor: No
-# - Email-based password recovery
-# - Override defaults: Yes
-#   - Add Lambda trigger: PreSignUp -> Custom -> backend-aws/functions/preSignup
+- `false` (default) → local Express `/auth/*` + Bearer JWT.
+- `true` → Amplify v6 (`aws-amplify/auth`) → Cognito ID token sent raw in the `Authorization` header (no `Bearer` prefix; API Gateway Cognito authorizer expects it that way).
 
-amplify add api
-# - REST, restrict access by Cognito User Pool
-# - One Lambda per route group:
-#     /attendees[/{id}]              -> attendees
-#     /spins, /spins/latest          -> spins
-#     /meetings[/{id}]               -> meetings
-#     /stats                         -> stats
-#     /users/pending,
-#     /users/{id}/approve,
-#     /users/{id}/reject             -> adminUsers
-#     /verse                         -> verse           (PUBLIC — disable authorizer)
-#   (Optional, only if you choose the "/auth Lambdas" path above:)
-#     /auth/login, /auth/me, /auth/signup -> new auth lambda you add
+On AWS:
 
-amplify add storage    # DynamoDB
-# Three on-demand tables (see schema below)
-
-amplify add hosting    # then `amplify publish`
-```
-
-After `amplify push`:
-
-1. Verify your admin sender address in **SES**.
-2. Set env vars on each Lambda (see table below).
-3. Manually add yourself to the `admin` Cognito group to bootstrap.
+1. Sign-up creates an **UNCONFIRMED** Cognito user.
+2. `preSignUpTrigger` sets `autoVerifyEmail=true` (suppresses the self-confirm code email Cognito would otherwise send) but leaves `autoConfirmUser=false`, and SES-notifies the admin if `ADMIN_NOTIFY_EMAIL` is set on the Lambda.
+3. Login throws `UserNotConfirmedException` → frontend shows "Account not yet approved by admin".
+4. Admin opens **Admin → Pending users**, clicks Approve → `adminUsers` Lambda calls `AdminConfirmSignUp` + `AdminAddUserToGroup(member)`.
+5. User can now log in.
 
 ## DynamoDB tables
 
-On-demand billing, single string partition key, no GSIs (Scan-based access is fine at this scale; add a GSI on a constant PK + timestamp sort key if `Spins` ever exceeds ~10k items).
+| Table       | PK           | Attributes |
+|-------------|--------------|-----------|
+| `Attendees` | `attendeeId` | `name`, `active`, `createdAt` |
+| `Meetings`  | `meetingId`  | `date`, `attendeeIds` (L), `topicType` (`fourTs`\|`reading`\|`presentation`\|null), `book`, `chapter`, `topicText`, `createdBy`, `createdAt` |
+| `Spins`     | `spinId`     | `timestamp`, `selectedAttendeeId`, `eligibleAttendeeIds` (L), `triggeredBy` |
 
-| Table       | PK            | Attributes |
-|-------------|---------------|-----------|
-| `Attendees` | `attendeeId`  | `name`, `active`, `createdAt` |
-| `Meetings`  | `meetingId`   | `date`, `attendeeIds` (L), `topicType` (`fourTs`\|`reading`\|`presentation`\|null), `book`, `chapter`, `topicText`, `createdBy`, `createdAt` |
-| `Spins`     | `spinId`      | `timestamp`, `selectedAttendeeId`, `eligibleAttendeeIds` (L), `triggeredBy` |
+Provisioned via CDK in [`amplify/backend.ts`](../amplify/backend.ts) with `PAY_PER_REQUEST` (on-demand) billing. No GSIs — `Scan` is fine at this scale. If `Spins` ever exceeds ~10k rows, add a GSI on a constant PK + `timestamp` sort key.
 
-The `meetings` Lambda treats `POST /meetings` as **upsert by `date`** — scheduling a topic and recording attendance for the same date target the same record. The frontend's "Save changes" in Admin → Upcoming meetings sends one POST per dirty week.
+## Lambda env vars
 
-## Lambda environment variables
+| Lambda             | Env vars (wired in `amplify/backend.ts`) |
+|--------------------|---|
+| `attendees`        | `ATTENDEES_TABLE`, `MEETINGS_TABLE`, `SPINS_TABLE` |
+| `meetings`         | (same) |
+| `spins`            | (same) |
+| `stats`            | (same) |
+| `verse`            | (same) — uses `MEETINGS_TABLE` |
+| `adminUsers`       | (same) + `USER_POOL_ID` |
+| `preSignUpTrigger` | optional: `ADMIN_NOTIFY_EMAIL`, `FROM_EMAIL` — set via Lambda console to enable signup notifications |
 
-| Lambda        | Required env vars |
-|---------------|---|
-| `attendees`   | `ATTENDEES_TABLE` |
-| `meetings`    | `MEETINGS_TABLE`, `ATTENDEES_TABLE` (the POST handler validates attendee IDs against the Attendees table) |
-| `spins`       | `SPINS_TABLE`, `ATTENDEES_TABLE` |
-| `stats`       | `ATTENDEES_TABLE`, `MEETINGS_TABLE`, `SPINS_TABLE` |
-| `verse`       | `MEETINGS_TABLE` |
-| `adminUsers`  | `USER_POOL_ID` |
-| `preSignup`   | `ADMIN_NOTIFY_EMAIL`, `FROM_EMAIL` (optional; defaults to `ADMIN_NOTIFY_EMAIL`) |
-
-## IAM
-
-Each handler needs `dynamodb:Scan`, `GetItem`, `PutItem`, `UpdateItem`, `DeleteItem` on the tables it references (above). Additionally:
-
-- `verse` makes outbound HTTPS to `bible-api.com` — no extra IAM, but the Lambda must be on a subnet with NAT if you VPC-attach it. Default (no VPC) is simplest.
-- `adminUsers` needs Cognito IDP permissions: `ListUsers`, `AdminConfirmSignUp`, `AdminAddUserToGroup`, `AdminDeleteUser` on the user pool.
-- `preSignup` needs `ses:SendEmail` from the verified sender.
-
-## Group-gated endpoints
-
-Handlers inspect `event.requestContext.authorizer.claims['cognito:groups']`. Admin-only routes (anything that mutates `meetings`, `attendees`, or the user list) call `isAdmin(event)` from `shared/helpers.js` and 403 otherwise.
-
-`/verse` and `/attendees` (GET only) are read by all signed-in users; `/verse` itself is **public** so the banner can render on `/login`.
-
-## Verse endpoint behavior
-
-`GET /verse`:
-
-1. Computes the current Thursday in **UTC**.
-2. Scans `Meetings` for the next 5 Thursdays (this week + 4).
-3. If a meeting has `topicType === 'reading'` with `book` + `chapter`, fetches `https://bible-api.com/<book>+<chapter>?translation=web`. Result is in-memory cached for 24h per Lambda container.
-4. Returns a random verse from that chapter. If no upcoming reading is scheduled, returns `null` and the frontend falls back to ourmanna.
-
-> **Date note:** the frontend now generates Thursday `dateStr` values from **local** date components (post-0.4.1 fix). For US users this still matches UTC Thursday for all but the late-evening-Wednesday edge case. If you observe a stale verse just after Wed→Thu rollover in a UTC− timezone, you're hitting last week's reading until UTC catches up — this is expected for now.
+All Lambdas run on **Node.js 20** (`verse/index.js` uses global `fetch`).
 
 ## Local parity
 
-Routes in `../backend-local/src/routes/*.ts` are the authoritative behavior reference. Each Lambda has a 1:1 counterpart there (except `/auth/*` — see the warning at the top). When changing a route's behavior, update both sides.
+Routes in `../backend-local/src/routes/*.ts` mirror these handlers and are the authoritative behavior reference. When changing a route, update both:
+
+- `backend-local/src/routes/<name>.ts` (Express + JSON store)
+- `backend-aws/functions/<name>/index.js` (Lambda + DynamoDB)
+
+The CDK wiring in `amplify/backend.ts` rarely needs to change — only when adding/removing routes or env vars.
