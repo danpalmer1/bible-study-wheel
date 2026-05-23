@@ -114,6 +114,7 @@ adminUsersFn.role!.addToPrincipalPolicy(
   new PolicyStatement({
     actions: [
       'cognito-idp:ListUsers',
+      'cognito-idp:ListUsersInGroup',
       'cognito-idp:AdminConfirmSignUp',
       'cognito-idp:AdminAddUserToGroup',
       'cognito-idp:AdminDeleteUser',
@@ -192,12 +193,14 @@ api.root.addResource('stats').addMethod('GET', integ.stats, authed);
 // /verse — public (banner renders on /login)
 api.root.addResource('verse').addMethod('GET', integ.verse, publicOpts);
 
-// /users/pending, /users/{id}/approve, /users/{id}/reject
+// /users (list approved), /users/pending, /users/{id}/{approve,reject,promote}
 const usersRoot = api.root.addResource('users');
+usersRoot.addMethod('GET', integ.adminUsers, authed);
 usersRoot.addResource('pending').addMethod('GET', integ.adminUsers, authed);
 const usersId = usersRoot.addResource('{id}');
 usersId.addResource('approve').addMethod('POST', integ.adminUsers, authed);
 usersId.addResource('reject').addMethod('POST', integ.adminUsers, authed);
+usersId.addResource('promote').addMethod('POST', integ.adminUsers, authed);
 
 // ---------- Outputs ----------
 
