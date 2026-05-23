@@ -115,17 +115,23 @@ function AttendeesTab() {
 
   return (
     <div className="card">
-      <div className="px-5 py-3 border-b border-woodland-border flex gap-2">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          add();
+        }}
+        className="px-5 py-3 border-b border-woodland-border flex gap-2"
+      >
         <input
           value={newName}
           onChange={(e) => setNewName(e.target.value)}
           placeholder="New attendee name"
           className="input flex-1 py-1.5"
         />
-        <button onClick={add} className="btn-primary py-1.5">
+        <button type="submit" className="btn-primary py-1.5">
           Add
         </button>
-      </div>
+      </form>
       {error && <p className="px-5 py-3 text-woodland-danger text-sm">{error}</p>}
       <ul>
         {attendees.map((a) => (
