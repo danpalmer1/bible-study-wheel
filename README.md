@@ -35,18 +35,17 @@ bible-study-wheel/
 └── backend-aws/     # Lambda equivalents (for deploy)
 ```
 
-## Deploy to AWS (Amplify)
+## Deploy to AWS (Amplify Gen 2)
 
-See [backend-aws/README.md](backend-aws/README.md). Short version:
-1. Install Amplify CLI, `amplify configure`, `amplify init`
-2. `amplify add auth` (with `admin` + `member` groups, `PreSignUp` trigger)
-3. `amplify add api` (REST, Cognito authorizer)
-4. `amplify add storage` (DynamoDB: Attendees, Meetings, Spins)
-5. Copy `backend-aws/functions/*` into Amplify's generated function folders
-6. Verify admin email in SES
-7. `amplify push` then `amplify add hosting && amplify publish`
+Full first-time walkthrough in [backend-aws/AWS_SETUP.md](backend-aws/AWS_SETUP.md). Short version:
 
-First admin: after deploy, manually add yourself to the `admin` Cognito group in the AWS Console (bootstrap step).
+1. `aws configure` with an IAM admin user. Gen 2 talks to AWS via your CLI credentials directly — no `amplify configure`, no separate Amplify IAM user.
+2. From the repo root: `npm install`, then `npx ampx sandbox` to provision your personal dev stack. This deploys Cognito, three DynamoDB tables, and the six API Lambdas + preSignUp trigger defined in [`amplify/backend.ts`](amplify/backend.ts), and writes `amplify_outputs.json` to the repo root.
+3. `npm run sync-config` copies the relevant values into `frontend/.env.local`. Then `cd frontend && npm run dev` runs the SPA locally against the sandbox backend.
+4. (Optional) Verify a sender address in SES if you want admin sign-up notification emails.
+5. **Production deploy:** in the AWS Console, connect the repo to Amplify Hosting and pick the `master` branch. The `amplify.yml` build spec runs `npx ampx pipeline-deploy --branch master` (CDK-deploys the backend stack) followed by `vite build` (uploads the frontend to Amplify's CDN). Subsequent pushes to `master` redeploy automatically.
+
+First admin (one-time bootstrap): after signing up via the app, run `aws cognito-idp admin-confirm-sign-up` + `admin-add-user-to-group --group-name admin` against the pool ID from `amplify_outputs.json`. Full commands in [AWS_SETUP.md](backend-aws/AWS_SETUP.md).
 
 ## Known bugs
 
