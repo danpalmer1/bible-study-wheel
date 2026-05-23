@@ -13,10 +13,13 @@ frontend:
         # backend phase above and writes frontend/.env.local with the Cognito
         # IDs + API URL the Vite build will inline.
         - npm run sync-config
-        - cd frontend && npm ci --cache .npm --prefer-offline
+        # npm --prefix scopes cwd to the command only. `cd frontend &&` leaks
+        # across commands AND across phases in CodeBuild's shell, which
+        # breaks the next `cd frontend` with "No such file or directory".
+        - npm ci --prefix frontend --cache .npm --prefer-offline
     build:
       commands:
-        - cd frontend && npm run build
+        - npm run build --prefix frontend
   artifacts:
     baseDirectory: frontend/dist
     files:
