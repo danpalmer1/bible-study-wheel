@@ -62,15 +62,11 @@ First admin: after deploy, manually add yourself to the `admin` Cognito group in
   - Set `FROM_EMAIL=xdanielpalmerx@gmail.com` (or another verified address).
   - Either keep both addresses verified (sandbox-mode-friendly), or request SES production access if you ever want to email arbitrary recipients.
   - Trigger a test sign-up and check CloudWatch — the `SES notify failed` message will appear if anything is still off.
-- Bible verse selection: verify it pulls from *next week's* meeting, not the most recent past one. Example: if today is 2026-05-22 (Friday), the displayed verse should be for 2026-05-28's meeting, not 2026-05-21's.
 
 ## Future changes
 
-- Enter key activates the add/save button in text fields (forms should submit on Enter, not require mouse click).
-- Add favicon / app icon to the website.
-- Sign up: add show/hide password toggle.
-- Sign up: separate first name and last name fields (currently one combined name field).
 - **Make the site public-facing and the wheel fully unauthenticated.** Anonymous visitors can land on the page and spin the wheel with any roster selection, as many times as they want. The wheel becomes a pure visual spinner — no persistence, no stats impact, no distinction between "trial" and "official" spins. (Supersedes the earlier trial-spin / official-spin gating discussion — both concepts are dropped.)
 - **Meeting log is the only authoritative record of who got picked.** In the admin meeting-entry form, add a "Selected attendee" dropdown (sourced from the attendee roster) alongside the existing present/absent checkboxes. Admin selects who was spun for that meeting, ticks who attended, saves. The public-facing wheel does not write to the database — `/spins` POST and the Spins table become unused and can be removed in a later cleanup pass.
 - **User management within Attendees** (separate feature). Admin-only UI to (a) link an existing attendee record to a Cognito user account, and (b) promote a linked user to admin (adds them to the `admin` Cognito group). Lets members who sign up be tied to their historical roster entry rather than creating duplicates.
+- **GitHub Actions PR validation (hybrid CI).** Add `.github/workflows/ci.yml` that runs on `pull_request` against `master` / `release/**`: typechecks `amplify/`, runs `npm --prefix frontend run build` (which does `tsc -b && vite build`), and typechecks `backend-local/`. Amplify Hosting keeps owning the actual deploy from `master`; this just gates PRs so regressions don't reach the release branch. Free for both public and private repos (2,000 minutes/month on private, unlimited on public). Restores the `[skip ci]` convention as a side effect.
 - Future / out-of-scope idea: turn this into a **multi-tenant platform** where any group can spin up their own instance with their own roster, attendees, and stats — basically this app becomes one "tenant" inside a larger portal. Keeping the scope of *this* app small (single group, single DB) so it can act as the reference implementation / prototype for what a single tenant would look like inside that bigger system.
