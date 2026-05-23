@@ -7,12 +7,16 @@ import { signToken, requireAuth, AuthedRequest } from '../auth.js';
 const router = Router();
 
 router.post('/signup', (req, res) => {
-  const { email, password, name } = req.body ?? {};
-  if (!email || !password || !name) {
-    return res.status(400).json({ error: 'email, password, name required' });
+  const { email, password, firstName, lastName } = req.body ?? {};
+  if (!email || !password || !firstName || !lastName) {
+    return res.status(400).json({ error: 'email, password, firstName, lastName required' });
   }
   if (password.length < 8) {
     return res.status(400).json({ error: 'Password must be at least 8 characters' });
+  }
+  const name = `${String(firstName).trim()} ${String(lastName).trim()}`.trim();
+  if (!name) {
+    return res.status(400).json({ error: 'firstName and lastName cannot be blank' });
   }
   const db = load();
   const normalizedEmail = String(email).toLowerCase();
@@ -22,7 +26,7 @@ router.post('/signup', (req, res) => {
   const user = {
     userId: uuid(),
     email: normalizedEmail,
-    name: String(name),
+    name,
     passwordHash: bcrypt.hashSync(password, 10),
     role: 'member' as const,
     status: 'pending' as const,

@@ -7,7 +7,12 @@ type AuthState = {
   user: AuthUser | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  signup: (email: string, password: string, name: string) => Promise<void>;
+  signup: (
+    email: string,
+    password: string,
+    firstName: string,
+    lastName: string
+  ) => Promise<void>;
   logout: () => Promise<void>;
 };
 
@@ -30,11 +35,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(u);
   };
 
-  const signup = async (email: string, password: string, name: string) => {
+  const signup = async (
+    email: string,
+    password: string,
+    firstName: string,
+    lastName: string
+  ) => {
     if (USE_AMPLIFY) {
-      await amplifySignup(email, password, name);
+      await amplifySignup(email, password, firstName, lastName);
     } else {
-      await api.post('/auth/signup', { email, password, name });
+      await api.post('/auth/signup', { email, password, firstName, lastName });
     }
   };
 
@@ -93,10 +103,16 @@ async function loadAmplifyUser(): Promise<AuthUser | null> {
     const session = await fetchAuthSession();
     const groupsClaim = session.tokens?.idToken?.payload['cognito:groups'];
     const groups = Array.isArray(groupsClaim) ? (groupsClaim as string[]) : [];
+    // Prefer given_name + family_name (new signups); fall back to name for
+    // legacy users created before the split.
+    const composed = [attrs.given_name, attrs.family_name]
+      .filter((v): v is string => !!v && v.trim().length > 0)
+      .join(' ')
+      .trim();
     return {
       userId: current.userId,
       email: attrs.email ?? '',
-      name: attrs.name ?? '',
+      name: composed || attrs.name || '',
       role: groups.includes('admin') ? 'admin' : 'member',
     };
   } catch {
@@ -123,13 +139,26 @@ async function amplifyLogin(email: string, password: string): Promise<AuthUser> 
   return u;
 }
 
-async function amplifySignup(email: string, password: string, name: string): Promise<void> {
+async function amplifySignup(
+  email: string,
+  password: string,
+  firstName: string,
+  lastName: string
+): Promise<void> {
   const { signUp } = await import('aws-amplify/auth');
+  const fullName = `${firstName.trim()} ${lastName.trim()}`.trim();
   await signUp({
     username: email,
     password,
     options: {
-      userAttributes: { email, name },
+      // `name` (Cognito `name`) is required on the pool; given/family are
+      // optional but populated for new signups so display can prefer them.
+      userAttributes: {
+        email,
+        name: fullName,
+        given_name: firstName.trim(),
+        family_name: lastName.trim(),
+      },
     },
   });
 }
