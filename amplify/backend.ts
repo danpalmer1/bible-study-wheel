@@ -168,8 +168,10 @@ const integ = {
 };
 
 // /attendees, /attendees/{id}
+// GET is public so the unauthenticated wheel page can render the roster.
+// Writes (POST/PUT) still require an admin-group Cognito token.
 const attendeesRoot = api.root.addResource('attendees');
-attendeesRoot.addMethod('GET', integ.attendees, authed);
+attendeesRoot.addMethod('GET', integ.attendees, publicOpts);
 attendeesRoot.addMethod('POST', integ.attendees, authed);
 attendeesRoot.addResource('{id}').addMethod('PUT', integ.attendees, authed);
 

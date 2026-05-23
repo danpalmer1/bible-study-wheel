@@ -22,9 +22,9 @@ export default function Nav() {
           Bible Study Wheel
         </Link>
         <nav className="flex items-center gap-1">
+          <NavLink to="/wheel" className={linkCls}>Wheel</NavLink>
           {user ? (
             <>
-              <NavLink to="/wheel" className={linkCls}>Wheel</NavLink>
               <NavLink to="/stats" className={linkCls}>Stats</NavLink>
               {user.role === 'admin' && (
                 <NavLink to="/admin" className={linkCls}>Admin</NavLink>

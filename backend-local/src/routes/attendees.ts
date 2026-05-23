@@ -5,7 +5,8 @@ import { requireAuth, requireAdmin } from '../auth.js';
 
 const router = Router();
 
-router.get('/', requireAuth, (_req, res) => {
+// Public — the unauthenticated wheel page reads the roster.
+router.get('/', (_req, res) => {
   const db = load();
   res.json(db.attendees);
 });
