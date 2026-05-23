@@ -9,6 +9,13 @@ Versioning is loose pre-1.0 — minor versions may include breaking changes.
 
 _Add new entries here as work lands; promote to a versioned section when shipping._
 
+### Fixed — Amplify Gen 2 sandbox deploys end-to-end
+- `amplify/backend.ts` — replaced the 6 API Lambdas' `defineFunction()` definitions with raw CDK `NodejsFunction` in the custom `BibleStudyApiStack`. The previous setup created a cross-stack cycle (`auth → function → BibleStudyApiStack → auth`) via Lambda env vars referencing tables in one stack and the user pool in another. Co-locating tables, Lambdas, and grants in a single stack breaks the cycle. Bonus: `NodejsFunction` externalizes `@aws-sdk/*` by default (Lambda Node 20 runtime provides them), so Lambdas are smaller.
+- Root `package.json` — added `@aws-sdk/client-dynamodb`, `@aws-sdk/lib-dynamodb`, `@aws-sdk/client-ses`, `@aws-sdk/client-cognito-identity-provider` as runtime deps and `@types/node` as dev. `defineFunction()` (still used for the preSignUp trigger) doesn't externalize the SDK by default, so esbuild needs to resolve them; the explicit deps give it a path. Future API-Lambda changes don't need them since `NodejsFunction` externalizes by default.
+- `backend-aws/functions/preSignup/index.js` — converted from CommonJS to ESM (`import` + `export const handler`). `defineFunction()` bundles with `--format=esm`, which mangles the CJS `exports.handler` pattern into something Lambda can't resolve (`index.handler is undefined or not exported`). The other handlers stay CJS because `NodejsFunction` preserves source format.
+- `backend-aws/functions/preSignup/index.js` — removed the `autoVerifyEmail=true` / `autoConfirmUser=false` response. Cognito rejects that combination at runtime (*"Phone or email cannot be auto verified, when user is not being auto confirmed"*). The trigger now only handles the optional SES notification; the admin-approval gate is enforced by Cognito's UNCONFIRMED state instead.
+- `amplify/backend.ts` — added CDK escape hatch on the Cognito user pool to set `autoVerifiedAttributes = []` and `userAttributeUpdateSettings.attributesRequireVerificationBeforeUpdate = []`. Together these stop Cognito from sending the self-confirm code email at signup, which would otherwise let users bypass admin approval. Trade-off: email-based self-service password reset is unavailable; admin must use `AdminSetUserPassword`.
+
 ### Added — Amplify Gen 2 migration
 - `amplify/backend.ts` — Gen 2 backend defined in TypeScript:
   - `defineAuth()` with `admin` + `member` groups and the preSignUpTrigger attached.

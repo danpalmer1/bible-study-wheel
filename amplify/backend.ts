@@ -1,4 +1,6 @@
 import { defineBackend } from '@aws-amplify/backend';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
 import { Stack } from 'aws-cdk-lib';
 import {
   AttributeType,
@@ -14,28 +16,34 @@ import {
   type MethodOptions,
 } from 'aws-cdk-lib/aws-apigateway';
 import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
-import type { Function as LambdaFn } from 'aws-cdk-lib/aws-lambda';
+import { Runtime } from 'aws-cdk-lib/aws-lambda';
+import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
 
 import { auth } from './auth/resource';
 import { preSignUpTrigger } from './functions/preSignUp/resource';
-import { attendeesFn } from './functions/attendees/resource';
-import { meetingsFn } from './functions/meetings/resource';
-import { spinsFn } from './functions/spins/resource';
-import { statsFn } from './functions/stats/resource';
-import { verseFn } from './functions/verse/resource';
-import { adminUsersFn } from './functions/adminUsers/resource';
 
 const backend = defineBackend({
   auth,
   preSignUpTrigger,
-  attendeesFn,
-  meetingsFn,
-  spinsFn,
-  statsFn,
-  verseFn,
-  adminUsersFn,
 });
 
+// Disable Cognito's self-confirm email flow. Default user pool config has
+// `email` in AutoVerifiedAttributes, which triggers a verification-code email
+// the user could enter to bypass admin approval. With this empty, signups
+// stay UNCONFIRMED with no code email sent until AdminConfirmSignUp.
+// AttributesRequireVerificationBeforeUpdate must be a subset of
+// AutoVerifiedAttributes, so clear both. Email-based password reset is
+// unavailable as a result; admin must reset passwords via
+// AdminSetUserPassword.
+const cfnUserPool = backend.auth.resources.cfnResources.cfnUserPool;
+cfnUserPool.autoVerifiedAttributes = [];
+cfnUserPool.userAttributeUpdateSettings = {
+  attributesRequireVerificationBeforeUpdate: [],
+};
+
+// All API resources live in this stack — tables, Lambdas, REST API. Keeping
+// them co-located prevents the cross-stack reference cycle that arises when
+// Lambda env vars and table grants span stacks.
 const apiStack = backend.createStack('BibleStudyApiStack');
 
 // ---------- DynamoDB tables ----------
@@ -55,47 +63,54 @@ const spinsTable = new Table(apiStack, 'SpinsTable', {
   billingMode: BillingMode.PAY_PER_REQUEST,
 });
 
-// ---------- Wire env vars + IAM ----------
+// ---------- API Lambdas ----------
+// Raw NodejsFunction (not defineFunction) — keeps the Lambdas in apiStack
+// alongside the tables they read/write, so grants and env vars stay
+// intra-stack. NodejsFunction defaults to externalizing @aws-sdk/* (Lambda
+// Node 20 runtime provides them), so we don't ship the SDK with each fn.
 
-// resources.lambda is typed as IFunction, but defineFunction always produces a
-// concrete Function — cast so we can call addEnvironment.
-const apiLambdas = {
-  attendees: backend.attendeesFn.resources.lambda as LambdaFn,
-  meetings: backend.meetingsFn.resources.lambda as LambdaFn,
-  spins: backend.spinsFn.resources.lambda as LambdaFn,
-  stats: backend.statsFn.resources.lambda as LambdaFn,
-  verse: backend.verseFn.resources.lambda as LambdaFn,
-  adminUsers: backend.adminUsersFn.resources.lambda as LambdaFn,
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const handlersRoot = resolve(__dirname, '../backend-aws/functions');
+
+const tableEnv = {
+  ATTENDEES_TABLE: attendeesTable.tableName,
+  MEETINGS_TABLE: meetingsTable.tableName,
+  SPINS_TABLE: spinsTable.tableName,
 };
-const preSignUpLambda = backend.preSignUpTrigger.resources.lambda as LambdaFn;
 
-// All API lambdas see all three table names; each Lambda only uses the ones
-// it touches, but a single shared env shape keeps the handlers simple.
-for (const fn of Object.values(apiLambdas)) {
-  fn.addEnvironment('ATTENDEES_TABLE', attendeesTable.tableName);
-  fn.addEnvironment('MEETINGS_TABLE', meetingsTable.tableName);
-  fn.addEnvironment('SPINS_TABLE', spinsTable.tableName);
+function apiHandler(id: string, dir: string, extraEnv: Record<string, string> = {}) {
+  return new NodejsFunction(apiStack, id, {
+    entry: resolve(handlersRoot, dir, 'index.js'),
+    runtime: Runtime.NODEJS_20_X,
+    environment: { ...tableEnv, ...extraEnv },
+  });
 }
 
-// DDB grants — least-privilege per handler.
-attendeesTable.grantReadWriteData(apiLambdas.attendees);
-attendeesTable.grantReadData(apiLambdas.meetings); // validates attendeeIds
-attendeesTable.grantReadData(apiLambdas.spins); // validates attendeeIds
-attendeesTable.grantReadData(apiLambdas.stats);
+const attendeesFn = apiHandler('attendeesFn', 'attendees');
+const meetingsFn = apiHandler('meetingsFn', 'meetings');
+const spinsFn = apiHandler('spinsFn', 'spins');
+const statsFn = apiHandler('statsFn', 'stats');
+const verseFn = apiHandler('verseFn', 'verse');
+const adminUsersFn = apiHandler('adminUsersFn', 'adminUsers', {
+  USER_POOL_ID: backend.auth.resources.userPool.userPoolId,
+});
 
-meetingsTable.grantReadWriteData(apiLambdas.meetings);
-meetingsTable.grantReadData(apiLambdas.stats);
-meetingsTable.grantReadData(apiLambdas.verse);
+// ---------- DDB grants (least-privilege) ----------
 
-spinsTable.grantReadWriteData(apiLambdas.spins);
-spinsTable.grantReadData(apiLambdas.stats);
+attendeesTable.grantReadWriteData(attendeesFn);
+attendeesTable.grantReadData(meetingsFn); // validates attendeeIds on POST
+attendeesTable.grantReadData(spinsFn); // validates attendeeIds on POST
+attendeesTable.grantReadData(statsFn);
 
-// adminUsers needs the user pool ID + Cognito IDP perms.
-apiLambdas.adminUsers.addEnvironment(
-  'USER_POOL_ID',
-  backend.auth.resources.userPool.userPoolId
-);
-apiLambdas.adminUsers.role!.addToPrincipalPolicy(
+meetingsTable.grantReadWriteData(meetingsFn);
+meetingsTable.grantReadData(statsFn);
+meetingsTable.grantReadData(verseFn);
+
+spinsTable.grantReadWriteData(spinsFn);
+spinsTable.grantReadData(statsFn);
+
+// adminUsers calls Cognito IDP scoped to this user pool.
+adminUsersFn.role!.addToPrincipalPolicy(
   new PolicyStatement({
     actions: [
       'cognito-idp:ListUsers',
@@ -107,10 +122,11 @@ apiLambdas.adminUsers.role!.addToPrincipalPolicy(
   })
 );
 
-// preSignUp may optionally send SES notifications when ADMIN_NOTIFY_EMAIL is
-// set on the Lambda. Grant SES perms so the user can wire that up later
-// without re-deploying IAM.
-preSignUpLambda.role!.addToPrincipalPolicy(
+// preSignUp may optionally SES-notify the admin if ADMIN_NOTIFY_EMAIL is set
+// on the Lambda. Grant SES so it's ready when env vars are added later.
+// The trigger Lambda lives in its own stack (function); attaching the
+// policy from apiStack creates apiStack→function (one-way, no cycle).
+backend.preSignUpTrigger.resources.lambda.role!.addToPrincipalPolicy(
   new PolicyStatement({
     actions: ['ses:SendEmail', 'ses:SendRawEmail'],
     resources: ['*'],
@@ -143,46 +159,40 @@ const publicOpts: MethodOptions = {
 };
 
 const integ = {
-  attendees: new LambdaIntegration(apiLambdas.attendees),
-  meetings: new LambdaIntegration(apiLambdas.meetings),
-  spins: new LambdaIntegration(apiLambdas.spins),
-  stats: new LambdaIntegration(apiLambdas.stats),
-  verse: new LambdaIntegration(apiLambdas.verse),
-  adminUsers: new LambdaIntegration(apiLambdas.adminUsers),
+  attendees: new LambdaIntegration(attendeesFn),
+  meetings: new LambdaIntegration(meetingsFn),
+  spins: new LambdaIntegration(spinsFn),
+  stats: new LambdaIntegration(statsFn),
+  verse: new LambdaIntegration(verseFn),
+  adminUsers: new LambdaIntegration(adminUsersFn),
 };
 
 // /attendees, /attendees/{id}
 const attendeesRoot = api.root.addResource('attendees');
 attendeesRoot.addMethod('GET', integ.attendees, authed);
 attendeesRoot.addMethod('POST', integ.attendees, authed);
-const attendeesId = attendeesRoot.addResource('{id}');
-attendeesId.addMethod('PUT', integ.attendees, authed);
+attendeesRoot.addResource('{id}').addMethod('PUT', integ.attendees, authed);
 
 // /meetings, /meetings/{id}
 const meetingsRoot = api.root.addResource('meetings');
 meetingsRoot.addMethod('GET', integ.meetings, authed);
 meetingsRoot.addMethod('POST', integ.meetings, authed);
-const meetingsId = meetingsRoot.addResource('{id}');
-meetingsId.addMethod('DELETE', integ.meetings, authed);
+meetingsRoot.addResource('{id}').addMethod('DELETE', integ.meetings, authed);
 
 // /spins, /spins/latest
 const spinsRoot = api.root.addResource('spins');
 spinsRoot.addMethod('POST', integ.spins, authed);
-const spinsLatest = spinsRoot.addResource('latest');
-spinsLatest.addMethod('GET', integ.spins, authed);
+spinsRoot.addResource('latest').addMethod('GET', integ.spins, authed);
 
 // /stats
-const statsRoot = api.root.addResource('stats');
-statsRoot.addMethod('GET', integ.stats, authed);
+api.root.addResource('stats').addMethod('GET', integ.stats, authed);
 
 // /verse — public (banner renders on /login)
-const verseRoot = api.root.addResource('verse');
-verseRoot.addMethod('GET', integ.verse, publicOpts);
+api.root.addResource('verse').addMethod('GET', integ.verse, publicOpts);
 
 // /users/pending, /users/{id}/approve, /users/{id}/reject
 const usersRoot = api.root.addResource('users');
-const usersPending = usersRoot.addResource('pending');
-usersPending.addMethod('GET', integ.adminUsers, authed);
+usersRoot.addResource('pending').addMethod('GET', integ.adminUsers, authed);
 const usersId = usersRoot.addResource('{id}');
 usersId.addResource('approve').addMethod('POST', integ.adminUsers, authed);
 usersId.addResource('reject').addMethod('POST', integ.adminUsers, authed);

@@ -1,19 +1,16 @@
-const { SESClient, SendEmailCommand } = require('@aws-sdk/client-ses');
+// ESM module — bundled by defineFunction with --format=esm.
+// Pure notification trigger; the admin-approval gate is enforced by Cognito's
+// own UNCONFIRMED state. The user pool is configured (in amplify/backend.ts)
+// with no auto-verified attributes, so Cognito never sends a self-confirm
+// code email — users stay UNCONFIRMED until AdminConfirmSignUp is called via
+// POST /users/{id}/approve.
+import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
 
 const ses = new SESClient({});
 const ADMIN_EMAIL = process.env.ADMIN_NOTIFY_EMAIL;
 const FROM_EMAIL = process.env.FROM_EMAIL || ADMIN_EMAIL;
 
-exports.handler = async (event) => {
-  // Mark email as verified WITHOUT auto-confirming the user. Cognito's default
-  // is to send a verification code email the user can self-confirm with, which
-  // would bypass the admin-approval gate. autoVerifyEmail=true suppresses that
-  // email; the user stays UNCONFIRMED until an admin calls AdminConfirmSignUp
-  // via POST /users/{id}/approve.
-  event.response = event.response || {};
-  event.response.autoVerifyEmail = true;
-  event.response.autoConfirmUser = false;
-
+export const handler = async (event) => {
   if (ADMIN_EMAIL && FROM_EMAIL) {
     const newUser = event.request.userAttributes;
     try {
