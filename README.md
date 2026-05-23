@@ -50,7 +50,18 @@ First admin: after deploy, manually add yourself to the `admin` Cognito group in
 
 ## Known bugs
 
-- **Admin sign-up notification email not firing.** Multiple users have signed up but no notification email arrived at `xdanielpalmerx@gmail.com`, despite SES being set up and the sender identity verified. Things to check: `ADMIN_NOTIFY_EMAIL` and `FROM_EMAIL` env vars on the `preSignUpTrigger` Lambda, whether SES is still in sandbox mode (in sandbox, the *recipient* address also has to be verified), the Lambda's IAM permission for `ses:SendEmail`, and the CloudWatch logs for `preSignUpTrigger` to see if the SES call is silently throwing and being swallowed.
+- **Admin sign-up notification email not firing.** Multiple users have signed up but no notification email arrived at `xdanielpalmerx@gmail.com`, despite verifying the sender identity in SES. The trigger Lambda already has `ses:SendEmail` IAM permission (granted in `amplify/backend.ts`), so the failure is one of:
+  1. **`ADMIN_NOTIFY_EMAIL` and/or `FROM_EMAIL` env vars not set on the prod `preSignUpTrigger` Lambda.** The handler (`backend-aws/functions/preSignup/index.js`) reads both env vars and **silently skips the SES call** if either is missing — that's the most likely cause. Verify in Lambda console → preSignUpTrigger → Configuration → Environment variables. Both must be set, and `FROM_EMAIL` defaults to `ADMIN_NOTIFY_EMAIL` if unset.
+  2. **SES still in sandbox mode in the deployed region.** In SES sandbox, *both* sender and recipient must be verified identities. Verifying only `xdanielpalmerx@gmail.com` as sender isn't enough — it also has to be verified as a recipient (or you have to request production-access from AWS to send to unverified addresses). For a single-recipient admin notification, the simplest path is to verify the same address for both, which the SES console treats as one verified identity covering both sender and recipient.
+  3. **Region mismatch.** SES identities are per-region. If the Lambda runs in `us-east-1` but the verified identity is in another region, sends fail. Confirm Lambda region matches the region where the identity was verified.
+  4. **CloudWatch logs.** The handler catches and logs SES errors (`console.error('SES notify failed (signup still allowed):', e)`) but doesn't fail the sign-up. Check the `preSignUpTrigger` log group for the actual error — that nails down which of the above is hitting.
+
+  Requirements checklist for fixing:
+  - Verify `xdanielpalmerx@gmail.com` as an SES identity in the same region as the prod Lambda (likely `us-east-1`).
+  - Set `ADMIN_NOTIFY_EMAIL=xdanielpalmerx@gmail.com` on the prod `preSignUpTrigger` Lambda environment.
+  - Set `FROM_EMAIL=xdanielpalmerx@gmail.com` (or another verified address).
+  - Either keep both addresses verified (sandbox-mode-friendly), or request SES production access if you ever want to email arbitrary recipients.
+  - Trigger a test sign-up and check CloudWatch — the `SES notify failed` message will appear if anything is still off.
 - Bible verse selection: verify it pulls from *next week's* meeting, not the most recent past one. Example: if today is 2026-05-22 (Friday), the displayed verse should be for 2026-05-28's meeting, not 2026-05-21's.
 
 ## Future changes
