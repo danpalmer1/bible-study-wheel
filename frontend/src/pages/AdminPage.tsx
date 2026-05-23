@@ -311,6 +311,7 @@ function MeetingsTab() {
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [date, setDate] = useState(() => toISODate(new Date()));
   const [presentIds, setPresentIds] = useState<Set<string>>(new Set());
+  const [selectedAttendeeId, setSelectedAttendeeId] = useState<string | null>(null);
   const [recordTopic, setRecordTopic] = useState<TopicDraft>(emptyDraft());
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -328,6 +329,7 @@ function MeetingsTab() {
   useEffect(() => {
     const existing = meetings.find((m) => m.date === date);
     setPresentIds(new Set(existing?.attendeeIds ?? []));
+    setSelectedAttendeeId(existing?.selectedAttendeeId ?? null);
     setRecordTopic(draftFromMeeting(existing));
   }, [date, meetings]);
 
@@ -382,6 +384,7 @@ function MeetingsTab() {
       await api.post('/meetings', {
         date,
         attendeeIds: Array.from(presentIds),
+        selectedAttendeeId,
         ...buildTopicBody(recordTopic),
       });
       refresh();
@@ -434,6 +437,21 @@ function MeetingsTab() {
               ))}
             </div>
           </div>
+          <div>
+            <label className="text-sm font-medium text-woodland-muted block mb-1">
+              Selected by wheel:
+            </label>
+            <select
+              value={selectedAttendeeId ?? ''}
+              onChange={(e) => setSelectedAttendeeId(e.target.value || null)}
+              className="input py-1.5 w-auto"
+            >
+              <option value="">— None —</option>
+              {visibleAttendees.map((a) => (
+                <option key={a.attendeeId} value={a.attendeeId}>{a.name}</option>
+              ))}
+            </select>
+          </div>
           <button onClick={submit} disabled={busy} className="btn-primary">
             Save meeting
           </button>
@@ -449,19 +467,30 @@ function MeetingsTab() {
           <p className="px-5 py-4 text-woodland-muted text-sm">No meetings recorded yet.</p>
         )}
         <ul>
-          {meetings.map((m) => (
-            <li key={m.meetingId} className="px-5 py-2.5 border-t border-woodland-border text-sm">
-              <div className="flex items-baseline justify-between gap-3 flex-wrap">
-                <div>
-                  <span className="font-medium">{m.date}</span>{' '}
-                  <span className="text-woodland-muted">— {topicSummary(m)}</span>
+          {meetings.map((m) => {
+            const selectedName = m.selectedAttendeeId
+              ? attendees.find((a) => a.attendeeId === m.selectedAttendeeId)?.name
+              : null;
+            return (
+              <li key={m.meetingId} className="px-5 py-2.5 border-t border-woodland-border text-sm">
+                <div className="flex items-baseline justify-between gap-3 flex-wrap">
+                  <div>
+                    <span className="font-medium">{m.date}</span>{' '}
+                    <span className="text-woodland-muted">— {topicSummary(m)}</span>
+                  </div>
+                  <span className="text-xs text-woodland-muted">
+                    {m.attendeeIds.length} present
+                    {selectedName && (
+                      <>
+                        <span className="mx-1.5">•</span>
+                        <span className="text-woodland-accent">✦</span> {selectedName}
+                      </>
+                    )}
+                  </span>
                 </div>
-                <span className="text-xs text-woodland-muted">
-                  {m.attendeeIds.length} present
-                </span>
-              </div>
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ul>
       </div>
     </div>

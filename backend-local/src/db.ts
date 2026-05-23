@@ -36,6 +36,8 @@ export type Meeting = {
   meetingId: string;
   date: string;
   attendeeIds: string[];
+  /** Attendee picked by the wheel for this meeting (admin-recorded). */
+  selectedAttendeeId?: string | null;
   topicType?: MeetingTopicType | null;
   book?: string | null;
   chapter?: number | null;
