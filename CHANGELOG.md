@@ -9,6 +9,15 @@ Versioning is loose pre-1.0 — minor versions may include breaking changes.
 
 _Add new entries here as work lands; promote to a versioned section when shipping._
 
+### Fixed — v0.5.0 Stats reads from meetings (replaces spins)
+- `backend-local/src/routes/stats.ts` + `backend-aws/functions/stats/index.js` — Stats no longer scans the `Spins` table. `timesSelected` now counts `meetings WHERE selectedAttendeeId === attendeeId`; `lastPick` is the most recent meeting with a `selectedAttendeeId` (returns `{ meetingId, date, selectedAttendeeId }`). With the wheel stateless as of v0.5.0, the old `lastSpin` shape and spins-derived counts froze on the day the feature shipped — this restores live numbers.
+- `timesEligible` collapses to `meetingsAttended` (every present attendee is on the wheel). Pick rate is now Picked ÷ Meetings attended. The `On wheel` column stays for visual parity but is now informational.
+- `frontend/src/api/client.ts` — `Stats.lastSpin: Spin | null` replaced with `Stats.lastPick: { meetingId, date, selectedAttendeeId } | null`. `Spin` type removed; nothing imported it after the v0.5.0 wheel rewrite.
+- `frontend/src/pages/StatsPage.tsx` — header now shows `Last pick: <date>` (meeting date, not spin timestamp). Footer note rewritten to explain the post-stateless-wheel semantics.
+
+### Removed — v0.5.0 /spins route + Spins DDB table
+- `backend-local/src/routes/spins.ts` + its mount in `backend-local/src/server.ts` deleted. `backend-aws/functions/spins/index.js` deleted. `amplify/backend.ts` — `Spins` DDB table, its IAM grants, and the `spinsFn` Lambda removed. `Spin` type and `spins` field dropped from `backend-local/src/db.ts`. Historical `spins` data in existing `db.json` files is left untouched as a manual archive; nothing reads it.
+
 ### Added — v0.5.0 public, stateless wheel
 - `frontend/src/App.tsx` — drop the `ProtectedRoute` wrapper on `/wheel` so anonymous visitors can land directly on the spinner.
 - `frontend/src/components/Nav.tsx` — show the "Wheel" link in both logged-in and logged-out nav states.
