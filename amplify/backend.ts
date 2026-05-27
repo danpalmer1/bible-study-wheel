@@ -114,6 +114,7 @@ adminUsersFn.role!.addToPrincipalPolicy(
   new PolicyStatement({
     actions: [
       'cognito-idp:ListUsers',
+      'cognito-idp:ListUsersInGroup',
       'cognito-idp:AdminConfirmSignUp',
       'cognito-idp:AdminAddUserToGroup',
       'cognito-idp:AdminDeleteUser',
@@ -168,8 +169,10 @@ const integ = {
 };
 
 // /attendees, /attendees/{id}
+// GET is public so the unauthenticated wheel page can render the roster.
+// Writes (POST/PUT) still require an admin-group Cognito token.
 const attendeesRoot = api.root.addResource('attendees');
-attendeesRoot.addMethod('GET', integ.attendees, authed);
+attendeesRoot.addMethod('GET', integ.attendees, publicOpts);
 attendeesRoot.addMethod('POST', integ.attendees, authed);
 attendeesRoot.addResource('{id}').addMethod('PUT', integ.attendees, authed);
 
@@ -190,12 +193,14 @@ api.root.addResource('stats').addMethod('GET', integ.stats, authed);
 // /verse — public (banner renders on /login)
 api.root.addResource('verse').addMethod('GET', integ.verse, publicOpts);
 
-// /users/pending, /users/{id}/approve, /users/{id}/reject
+// /users (list approved), /users/pending, /users/{id}/{approve,reject,promote}
 const usersRoot = api.root.addResource('users');
+usersRoot.addMethod('GET', integ.adminUsers, authed);
 usersRoot.addResource('pending').addMethod('GET', integ.adminUsers, authed);
 const usersId = usersRoot.addResource('{id}');
 usersId.addResource('approve').addMethod('POST', integ.adminUsers, authed);
 usersId.addResource('reject').addMethod('POST', integ.adminUsers, authed);
+usersId.addResource('promote').addMethod('POST', integ.adminUsers, authed);
 
 // ---------- Outputs ----------
 

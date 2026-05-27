@@ -18,6 +18,34 @@ router.get('/pending', requireAuth, requireAdmin, (_req, res) => {
   );
 });
 
+// All approved (active) users — used by Admin → Attendees to link a user
+// to a roster entry and to gate the "Promote to admin" control.
+router.get('/', requireAuth, requireAdmin, (_req, res) => {
+  const db = load();
+  res.json(
+    db.users
+      .filter((u) => u.status === 'active')
+      .map((u) => ({
+        userId: u.userId,
+        email: u.email,
+        name: u.name,
+        role: u.role,
+      }))
+  );
+});
+
+router.post('/:id/promote', requireAuth, requireAdmin, (req, res) => {
+  const db = load();
+  const user = db.users.find((u) => u.userId === req.params.id);
+  if (!user) return res.status(404).json({ error: 'Not found' });
+  if (user.status !== 'active') {
+    return res.status(400).json({ error: 'Can only promote active users' });
+  }
+  user.role = 'admin';
+  save();
+  res.json({ ok: true });
+});
+
 router.post('/:id/approve', requireAuth, requireAdmin, (req, res) => {
   const db = load();
   const user = db.users.find((u) => u.userId === req.params.id);

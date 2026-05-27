@@ -56,7 +56,16 @@ export type Attendee = {
   attendeeId: string;
   name: string;
   active: boolean;
+  /** Optional link to a Cognito (or local) user account. */
+  userId?: string | null;
   createdAt: string;
+};
+
+export type ApprovedUser = {
+  userId: string;
+  email: string;
+  name: string;
+  role: 'admin' | 'member';
 };
 
 export type Spin = {
@@ -73,6 +82,8 @@ export type Meeting = {
   meetingId: string;
   date: string;
   attendeeIds: string[];
+  /** Attendee picked by the wheel for this meeting (admin-recorded). */
+  selectedAttendeeId?: string | null;
   topicType?: MeetingTopicType | null;
   book?: string | null;
   chapter?: number | null;

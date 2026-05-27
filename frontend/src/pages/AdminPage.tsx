@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   api,
+  ApprovedUser,
   Attendee,
   Meeting,
   MeetingTopicType,
@@ -88,11 +89,17 @@ function PendingUsersTab() {
 
 function AttendeesTab() {
   const [attendees, setAttendees] = useState<Attendee[]>([]);
+  const [users, setUsers] = useState<ApprovedUser[]>([]);
   const [newName, setNewName] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   const refresh = () => {
-    api.get<Attendee[]>('/attendees').then(setAttendees).catch((e) => setError(e.message));
+    Promise.all([api.get<Attendee[]>('/attendees'), api.get<ApprovedUser[]>('/users')])
+      .then(([att, usr]) => {
+        setAttendees(att);
+        setUsers(usr);
+      })
+      .catch((e) => setError(e.message));
   };
   useEffect(refresh, []);
 
@@ -111,6 +118,23 @@ function AttendeesTab() {
     if (!name || name === a.name) return;
     await api.put(`/attendees/${a.attendeeId}`, { name });
     refresh();
+  };
+  const link = async (a: Attendee, userId: string | null) => {
+    try {
+      await api.put(`/attendees/${a.attendeeId}`, { userId });
+      refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Link failed');
+    }
+  };
+  const promote = async (u: ApprovedUser) => {
+    if (!confirm(`Promote ${u.name} (${u.email}) to admin?`)) return;
+    try {
+      await api.post(`/users/${u.userId}/promote`);
+      refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Promote failed');
+    }
   };
 
   return (
@@ -134,25 +158,70 @@ function AttendeesTab() {
       </form>
       {error && <p className="px-5 py-3 text-woodland-danger text-sm">{error}</p>}
       <ul>
-        {attendees.map((a) => (
-          <li
-            key={a.attendeeId}
-            className="px-5 py-2.5 border-t border-woodland-border flex items-center justify-between"
-          >
-            <span className={a.active ? '' : 'text-woodland-subtle italic'}>{a.name}</span>
-            <div className="flex gap-3 text-sm">
-              <button onClick={() => rename(a)} className="text-woodland-primary hover:underline">
-                Rename
-              </button>
-              <button
-                onClick={() => toggleActive(a)}
-                className="text-woodland-muted hover:underline"
-              >
-                {a.active ? 'Deactivate' : 'Reactivate'}
-              </button>
-            </div>
-          </li>
-        ))}
+        {attendees.map((a) => {
+          const linkedUser = a.userId ? users.find((u) => u.userId === a.userId) ?? null : null;
+          // Available users: not already linked to a different attendee.
+          const linkable = users.filter(
+            (u) =>
+              !attendees.some(
+                (other) => other.attendeeId !== a.attendeeId && other.userId === u.userId
+              )
+          );
+          const canPromote = linkedUser && linkedUser.role !== 'admin';
+          return (
+            <li
+              key={a.attendeeId}
+              className="px-5 py-2.5 border-t border-woodland-border flex items-center justify-between gap-3 flex-wrap"
+            >
+              <div className="min-w-[180px]">
+                <div className={a.active ? '' : 'text-woodland-subtle italic'}>{a.name}</div>
+                <div className="text-xs text-woodland-muted">
+                  {linkedUser ? (
+                    <>
+                      Linked: {linkedUser.name} ({linkedUser.email})
+                      {linkedUser.role === 'admin' && (
+                        <span className="ml-1 text-woodland-accent">· admin</span>
+                      )}
+                    </>
+                  ) : (
+                    'Not linked'
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center gap-3 text-sm flex-wrap">
+                <select
+                  value={a.userId ?? ''}
+                  onChange={(e) => link(a, e.target.value || null)}
+                  className="input py-1 text-xs"
+                >
+                  <option value="">— Not linked —</option>
+                  {linkable.map((u) => (
+                    <option key={u.userId} value={u.userId}>
+                      {u.name} ({u.email})
+                    </option>
+                  ))}
+                </select>
+                {canPromote && (
+                  <button
+                    onClick={() => promote(linkedUser!)}
+                    className="text-woodland-primary hover:underline"
+                  >
+                    Promote
+                  </button>
+                )}
+                <button onClick={() => rename(a)} className="text-woodland-primary hover:underline">
+                  Rename
+                </button>
+                <button
+                  onClick={() => toggleActive(a)}
+                  className="text-woodland-muted hover:underline"
+                >
+                  {a.active ? 'Deactivate' : 'Reactivate'}
+                </button>
+              </div>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );
@@ -311,6 +380,7 @@ function MeetingsTab() {
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [date, setDate] = useState(() => toISODate(new Date()));
   const [presentIds, setPresentIds] = useState<Set<string>>(new Set());
+  const [selectedAttendeeId, setSelectedAttendeeId] = useState<string | null>(null);
   const [recordTopic, setRecordTopic] = useState<TopicDraft>(emptyDraft());
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -328,6 +398,7 @@ function MeetingsTab() {
   useEffect(() => {
     const existing = meetings.find((m) => m.date === date);
     setPresentIds(new Set(existing?.attendeeIds ?? []));
+    setSelectedAttendeeId(existing?.selectedAttendeeId ?? null);
     setRecordTopic(draftFromMeeting(existing));
   }, [date, meetings]);
 
@@ -382,6 +453,7 @@ function MeetingsTab() {
       await api.post('/meetings', {
         date,
         attendeeIds: Array.from(presentIds),
+        selectedAttendeeId,
         ...buildTopicBody(recordTopic),
       });
       refresh();
@@ -434,6 +506,21 @@ function MeetingsTab() {
               ))}
             </div>
           </div>
+          <div>
+            <label className="text-sm font-medium text-woodland-muted block mb-1">
+              Selected by wheel:
+            </label>
+            <select
+              value={selectedAttendeeId ?? ''}
+              onChange={(e) => setSelectedAttendeeId(e.target.value || null)}
+              className="input py-1.5 w-auto"
+            >
+              <option value="">— None —</option>
+              {visibleAttendees.map((a) => (
+                <option key={a.attendeeId} value={a.attendeeId}>{a.name}</option>
+              ))}
+            </select>
+          </div>
           <button onClick={submit} disabled={busy} className="btn-primary">
             Save meeting
           </button>
@@ -449,19 +536,30 @@ function MeetingsTab() {
           <p className="px-5 py-4 text-woodland-muted text-sm">No meetings recorded yet.</p>
         )}
         <ul>
-          {meetings.map((m) => (
-            <li key={m.meetingId} className="px-5 py-2.5 border-t border-woodland-border text-sm">
-              <div className="flex items-baseline justify-between gap-3 flex-wrap">
-                <div>
-                  <span className="font-medium">{m.date}</span>{' '}
-                  <span className="text-woodland-muted">— {topicSummary(m)}</span>
+          {meetings.map((m) => {
+            const selectedName = m.selectedAttendeeId
+              ? attendees.find((a) => a.attendeeId === m.selectedAttendeeId)?.name
+              : null;
+            return (
+              <li key={m.meetingId} className="px-5 py-2.5 border-t border-woodland-border text-sm">
+                <div className="flex items-baseline justify-between gap-3 flex-wrap">
+                  <div>
+                    <span className="font-medium">{m.date}</span>{' '}
+                    <span className="text-woodland-muted">— {topicSummary(m)}</span>
+                  </div>
+                  <span className="text-xs text-woodland-muted">
+                    {m.attendeeIds.length} present
+                    {selectedName && (
+                      <>
+                        <span className="mx-1.5">•</span>
+                        <span className="text-woodland-accent">✦</span> {selectedName}
+                      </>
+                    )}
+                  </span>
                 </div>
-                <span className="text-xs text-woodland-muted">
-                  {m.attendeeIds.length} present
-                </span>
-              </div>
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ul>
       </div>
     </div>
