@@ -170,8 +170,8 @@ meetingsRoot.addMethod('GET', integ.meetings, authed);
 meetingsRoot.addMethod('POST', integ.meetings, authed);
 meetingsRoot.addResource('{id}').addMethod('DELETE', integ.meetings, authed);
 
-// /stats
-api.root.addResource('stats').addMethod('GET', integ.stats, authed);
+// /stats — public alongside the wheel; no member-only data.
+api.root.addResource('stats').addMethod('GET', integ.stats, publicOpts);
 
 // /verse — public (banner renders on /login)
 api.root.addResource('verse').addMethod('GET', integ.verse, publicOpts);

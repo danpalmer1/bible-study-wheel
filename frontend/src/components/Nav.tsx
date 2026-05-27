@@ -23,9 +23,9 @@ export default function Nav() {
         </Link>
         <nav className="flex items-center gap-1">
           <NavLink to="/wheel" className={linkCls}>Wheel</NavLink>
+          <NavLink to="/stats" className={linkCls}>Stats</NavLink>
           {user ? (
             <>
-              <NavLink to="/stats" className={linkCls}>Stats</NavLink>
               {user.role === 'admin' && (
                 <NavLink to="/admin" className={linkCls}>Admin</NavLink>
               )}

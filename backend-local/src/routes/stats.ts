@@ -1,10 +1,10 @@
 import { Router } from 'express';
 import { load } from '../db.js';
-import { requireAuth } from '../auth.js';
 
 const router = Router();
 
-router.get('/', requireAuth, (_req, res) => {
+// Public — anonymous visitors can see the stats table alongside the wheel.
+router.get('/', (_req, res) => {
   const db = load();
 
   const meetingsWithPick = db.meetings.filter((m) => m.selectedAttendeeId);
