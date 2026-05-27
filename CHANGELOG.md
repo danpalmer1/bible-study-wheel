@@ -9,6 +9,29 @@ Versioning is loose pre-1.0 — minor versions may include breaking changes.
 
 _Add new entries here as work lands; promote to a versioned section when shipping._
 
+### Added — v0.5.0 public, stateless wheel
+- `frontend/src/App.tsx` — drop the `ProtectedRoute` wrapper on `/wheel` so anonymous visitors can land directly on the spinner.
+- `frontend/src/components/Nav.tsx` — show the "Wheel" link in both logged-in and logged-out nav states.
+- `frontend/src/pages/WheelPage.tsx` — wheel becomes a pure visual roll. Removed: the `GET /spins/latest` fetch, the `POST /spins` call, the `lastSpin` / `submitting` state, the auto-exclude-last-picked behavior, and the "Recording…" button label. Button now toggles between `Spin` and `Spinning…`. The authoritative "who got picked" record moves to `Meeting.selectedAttendeeId` (separate entry below).
+- `amplify/backend.ts` — `GET /attendees` flipped from `authed` → `publicOpts` so the unauthenticated wheel can read the roster. Writes (`POST`, `PUT`) still require an admin-group Cognito token.
+- `backend-local/src/routes/attendees.ts` — local mirror: `GET /attendees` drops the `requireAuth` middleware.
+
+### Added — v0.5.0 meeting selected-attendee record
+- `frontend/src/api/client.ts` + `backend-local/src/db.ts` — `Meeting` gains an optional `selectedAttendeeId: string | null` field. Authoritative record of who the wheel picked for a given meeting.
+- `backend-aws/functions/meetings/index.js` + `backend-local/src/routes/meetings.ts` — `POST /meetings` accepts `selectedAttendeeId`, validates it against the known-attendee set (reusing the existing Scan in the AWS handler to avoid a second round-trip), and persists `null` to clear. Mirrored across AWS Lambda and local route.
+- `frontend/src/pages/AdminPage.tsx` (`MeetingsTab`) — new "Selected by wheel" dropdown below the attendance checkboxes, sourced from the same `visibleAttendees` list. Recent-meetings list shows a `✦ Name` inline badge for meetings that have a recorded selection.
+- **Known gap:** Stats still reads the legacy `Spins` table for `timesSelected` and `lastSpin`. Migration to read from `Meeting.selectedAttendeeId` is tracked as a follow-up branch (`feature/stats-from-meetings`) and documented under README → Known bugs. Must ship before `release/v0.5.0` merges to master.
+
+### Added — v0.5.0 admin: link attendees to users + promote
+- New endpoints, mirrored across `backend-aws/functions/adminUsers/index.js` and `backend-local/src/routes/users.ts`:
+  - `GET /users` — list approved (CONFIRMED / `active`) users with `role` derived from admin-group membership. Admin-only. AWS implementation issues `ListUsersCommand` + `ListUsersInGroupCommand` in parallel and joins them in-memory.
+  - `POST /users/{id}/promote` — adds the user to the `admin` Cognito group (AWS: `AdminAddUserToGroupCommand`) or flips `User.role` (local). Admin-only.
+- `PUT /attendees/{id}` now accepts an optional `userId` (string to link, `null` to unlink). Local route validates the userId exists in the user list; AWS Lambda trusts the caller (admin-only, no DDB FK to enforce).
+- `frontend/src/api/client.ts` — new `ApprovedUser` type; `Attendee` gains optional `userId`.
+- `frontend/src/pages/AdminPage.tsx` (`AttendeesTab`) — each attendee row now shows the linked user (name + email + admin badge) below the name, a select to link/unlink inline, and a "Promote" action that appears only when the linked user isn't already admin. The link-user picker filters out users already linked to another attendee to prevent duplicates.
+- `backend-aws/functions/adminUsers/index.js` — new `displayName(u)` helper prefers `given_name + family_name` (v0.5.0 split signup) and falls back to `name` for legacy users. Used by both the `/users/pending` list and the new `/users` list.
+- `amplify/backend.ts` — register `GET /users` and `POST /users/{id}/promote`; add `cognito-idp:ListUsersInGroup` to the `adminUsers` Lambda's IAM policy.
+
 ### Fixed — Amplify Gen 2 sandbox deploys end-to-end
 - `amplify/backend.ts` — replaced the 6 API Lambdas' `defineFunction()` definitions with raw CDK `NodejsFunction` in the custom `BibleStudyApiStack`. The previous setup created a cross-stack cycle (`auth → function → BibleStudyApiStack → auth`) via Lambda env vars referencing tables in one stack and the user pool in another. Co-locating tables, Lambdas, and grants in a single stack breaks the cycle. Bonus: `NodejsFunction` externalizes `@aws-sdk/*` by default (Lambda Node 20 runtime provides them), so Lambdas are smaller.
 - Root `package.json` — added `@aws-sdk/client-dynamodb`, `@aws-sdk/lib-dynamodb`, `@aws-sdk/client-ses`, `@aws-sdk/client-cognito-identity-provider` as runtime deps and `@types/node` as dev. `defineFunction()` (still used for the preSignUp trigger) doesn't externalize the SDK by default, so esbuild needs to resolve them; the explicit deps give it a path. Future API-Lambda changes don't need them since `NodejsFunction` externalizes by default.
