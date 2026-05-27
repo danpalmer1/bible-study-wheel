@@ -62,6 +62,10 @@ First admin (one-time bootstrap): after signing up via the app, run `aws cognito
   - Either keep both addresses verified (sandbox-mode-friendly), or request SES production access if you ever want to email arbitrary recipients.
   - Trigger a test sign-up and check CloudWatch — the `SES notify failed` message will appear if anything is still off.
 
+- **Wheel breaks when its inputs change mid-spin.** Mid-spin state lives in `Wheel.tsx` component state, so anything that re-renders the wheel during a spin corrupts the animation: toggling participants in the `AttendeeSelector` reshuffles the wedges out from under the spinner, and navigating to `/stats` (or any other route) unmounts the wheel entirely. Two design options on the table — pick one before the next release:
+  1. **Lock the inputs while spinning.** Disable nav links and the participant selector while `isSpinning === true`, re-enable when the spin resolves. Smallest change; keeps wheel state local to the page.
+  2. **Persist the wheel across page changes.** Hoist the wheel/animation state into a context or portal above the router so the wheel survives route changes (and ignore participant edits while spinning). Bigger refactor but a nicer UX.
+
 ## Future changes
 
 - **Make the site public-facing and the wheel fully unauthenticated.** Anonymous visitors can land on the page and spin the wheel with any roster selection, as many times as they want. The wheel becomes a pure visual spinner — no persistence, no stats impact, no distinction between "trial" and "official" spins. (Supersedes the earlier trial-spin / official-spin gating discussion — both concepts are dropped.)
