@@ -21,9 +21,9 @@ export default function StatsPage() {
     <div className="card overflow-hidden">
       <div className="px-5 py-4 border-b border-woodland-border flex items-center justify-between">
         <h1 className="text-xl font-semibold">Statistics</h1>
-        {stats.lastSpin && (
+        {stats.lastPick && (
           <span className="text-xs text-woodland-muted">
-            Last spin: {new Date(stats.lastSpin.timestamp).toLocaleString()}
+            Last pick: {stats.lastPick.date}
           </span>
         )}
       </div>
@@ -34,7 +34,7 @@ export default function StatsPage() {
             <th className="text-right px-4 py-2.5 font-medium">Meetings</th>
             <th
               className="text-right px-4 py-2.5 font-medium"
-              title="Number of spins this person was eligible for (on the wheel)"
+              title="Meetings attended — every present attendee is on the wheel"
             >
               On wheel
             </th>
@@ -79,9 +79,9 @@ export default function StatsPage() {
         </tbody>
       </table>
       <p className="px-5 py-3 text-xs text-woodland-muted border-t border-woodland-border bg-woodland-bg">
-        <strong>On wheel</strong> = spins this person was eligible for. The wheel auto-excludes the
-        last winner, so <strong>Picked</strong> alone can mislead — <strong>Pick rate</strong>{' '}
-        (picked ÷ on wheel) is the unbiased metric.
+        <strong>On wheel</strong> = meetings this person attended (every attendee is on the wheel
+        when present). <strong>Pick rate</strong> = picked ÷ on wheel. The wheel itself is now
+        purely visual — the authoritative pick is whoever the admin recorded for that meeting.
       </p>
     </div>
   );

@@ -68,14 +68,6 @@ export type ApprovedUser = {
   role: 'admin' | 'member';
 };
 
-export type Spin = {
-  spinId: string;
-  timestamp: string;
-  selectedAttendeeId: string;
-  eligibleAttendeeIds: string[];
-  triggeredBy: string;
-};
-
 export type MeetingTopicType = 'fourTs' | 'reading' | 'presentation';
 
 export type Meeting = {
@@ -109,7 +101,11 @@ export type Stats = {
     timesSelected: number;
     isLastSelected: boolean;
   }>;
-  lastSpin: Spin | null;
+  lastPick: {
+    meetingId: string;
+    date: string;
+    selectedAttendeeId: string;
+  } | null;
 };
 
 export type PendingUser = {

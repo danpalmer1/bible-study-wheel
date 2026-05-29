@@ -58,11 +58,6 @@ const meetingsTable = new Table(apiStack, 'MeetingsTable', {
   billingMode: BillingMode.PAY_PER_REQUEST,
 });
 
-const spinsTable = new Table(apiStack, 'SpinsTable', {
-  partitionKey: { name: 'spinId', type: AttributeType.STRING },
-  billingMode: BillingMode.PAY_PER_REQUEST,
-});
-
 // ---------- API Lambdas ----------
 // Raw NodejsFunction (not defineFunction) — keeps the Lambdas in apiStack
 // alongside the tables they read/write, so grants and env vars stay
@@ -75,7 +70,6 @@ const handlersRoot = resolve(__dirname, '../backend-aws/functions');
 const tableEnv = {
   ATTENDEES_TABLE: attendeesTable.tableName,
   MEETINGS_TABLE: meetingsTable.tableName,
-  SPINS_TABLE: spinsTable.tableName,
 };
 
 function apiHandler(id: string, dir: string, extraEnv: Record<string, string> = {}) {
@@ -88,7 +82,6 @@ function apiHandler(id: string, dir: string, extraEnv: Record<string, string> = 
 
 const attendeesFn = apiHandler('attendeesFn', 'attendees');
 const meetingsFn = apiHandler('meetingsFn', 'meetings');
-const spinsFn = apiHandler('spinsFn', 'spins');
 const statsFn = apiHandler('statsFn', 'stats');
 const verseFn = apiHandler('verseFn', 'verse');
 const adminUsersFn = apiHandler('adminUsersFn', 'adminUsers', {
@@ -99,15 +92,11 @@ const adminUsersFn = apiHandler('adminUsersFn', 'adminUsers', {
 
 attendeesTable.grantReadWriteData(attendeesFn);
 attendeesTable.grantReadData(meetingsFn); // validates attendeeIds on POST
-attendeesTable.grantReadData(spinsFn); // validates attendeeIds on POST
 attendeesTable.grantReadData(statsFn);
 
 meetingsTable.grantReadWriteData(meetingsFn);
 meetingsTable.grantReadData(statsFn);
 meetingsTable.grantReadData(verseFn);
-
-spinsTable.grantReadWriteData(spinsFn);
-spinsTable.grantReadData(statsFn);
 
 // adminUsers calls Cognito IDP scoped to this user pool.
 adminUsersFn.role!.addToPrincipalPolicy(
@@ -162,7 +151,6 @@ const publicOpts: MethodOptions = {
 const integ = {
   attendees: new LambdaIntegration(attendeesFn),
   meetings: new LambdaIntegration(meetingsFn),
-  spins: new LambdaIntegration(spinsFn),
   stats: new LambdaIntegration(statsFn),
   verse: new LambdaIntegration(verseFn),
   adminUsers: new LambdaIntegration(adminUsersFn),
@@ -182,13 +170,8 @@ meetingsRoot.addMethod('GET', integ.meetings, authed);
 meetingsRoot.addMethod('POST', integ.meetings, authed);
 meetingsRoot.addResource('{id}').addMethod('DELETE', integ.meetings, authed);
 
-// /spins, /spins/latest
-const spinsRoot = api.root.addResource('spins');
-spinsRoot.addMethod('POST', integ.spins, authed);
-spinsRoot.addResource('latest').addMethod('GET', integ.spins, authed);
-
-// /stats
-api.root.addResource('stats').addMethod('GET', integ.stats, authed);
+// /stats — public alongside the wheel; no member-only data.
+api.root.addResource('stats').addMethod('GET', integ.stats, publicOpts);
 
 // /verse — public (banner renders on /login)
 api.root.addResource('verse').addMethod('GET', integ.verse, publicOpts);

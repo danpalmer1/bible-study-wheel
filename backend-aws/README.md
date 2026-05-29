@@ -10,7 +10,6 @@ Lambda handler source for the AWS deployment. **Provisioning lives in [`../ampli
 functions/
 ├── attendees/      GET, POST /attendees;  PUT /attendees/{id}
 ├── meetings/       GET, POST /meetings;   DELETE /meetings/{id}     (upsert by date)
-├── spins/          GET /spins/latest, POST /spins
 ├── stats/          GET /stats
 ├── verse/          GET /verse                                       (public, no auth)
 ├── adminUsers/     GET /users/pending, POST /users/{id}/approve|reject
@@ -35,8 +34,8 @@ cd frontend && npm run dev   # frontend points at AWS
 `npx ampx sandbox` reads [`amplify/backend.ts`](../amplify/backend.ts) and provisions:
 
 - **Cognito user pool** with `admin` and `member` groups, `preSignUpTrigger` attached.
-- **3 DynamoDB tables** (Attendees, Meetings, Spins, on-demand billing, single string PK each).
-- **6 Lambdas** wrapping the handlers in this directory.
+- **2 DynamoDB tables** (Attendees, Meetings, on-demand billing, single string PK each).
+- **5 Lambdas** wrapping the handlers in this directory.
 - **API Gateway REST API** with a Cognito User Pools authorizer on every route except `GET /verse`.
 - IAM grants — least-privilege per Lambda (e.g. `meetings` gets read-only on `attendees` for ID validation; `verse` only gets read on `meetings`).
 
@@ -59,19 +58,17 @@ On AWS:
 
 | Table       | PK           | Attributes |
 |-------------|--------------|-----------|
-| `Attendees` | `attendeeId` | `name`, `active`, `createdAt` |
-| `Meetings`  | `meetingId`  | `date`, `attendeeIds` (L), `topicType` (`fourTs`\|`reading`\|`presentation`\|null), `book`, `chapter`, `topicText`, `createdBy`, `createdAt` |
-| `Spins`     | `spinId`     | `timestamp`, `selectedAttendeeId`, `eligibleAttendeeIds` (L), `triggeredBy` |
+| `Attendees` | `attendeeId` | `name`, `active`, `userId` (optional), `createdAt` |
+| `Meetings`  | `meetingId`  | `date`, `attendeeIds` (L), `selectedAttendeeId` (optional — admin-recorded wheel pick), `topicType` (`fourTs`\|`reading`\|`presentation`\|null), `book`, `chapter`, `topicText`, `createdBy`, `createdAt` |
 
-Provisioned via CDK in [`amplify/backend.ts`](../amplify/backend.ts) with `PAY_PER_REQUEST` (on-demand) billing. No GSIs — `Scan` is fine at this scale. If `Spins` ever exceeds ~10k rows, add a GSI on a constant PK + `timestamp` sort key.
+Provisioned via CDK in [`amplify/backend.ts`](../amplify/backend.ts) with `PAY_PER_REQUEST` (on-demand) billing. No GSIs — `Scan` is fine at this scale.
 
 ## Lambda env vars
 
 | Lambda             | Env vars (wired in `amplify/backend.ts`) |
 |--------------------|---|
-| `attendees`        | `ATTENDEES_TABLE`, `MEETINGS_TABLE`, `SPINS_TABLE` |
+| `attendees`        | `ATTENDEES_TABLE`, `MEETINGS_TABLE` |
 | `meetings`         | (same) |
-| `spins`            | (same) |
 | `stats`            | (same) |
 | `verse`            | (same) — uses `MEETINGS_TABLE` |
 | `adminUsers`       | (same) + `USER_POOL_ID` |

@@ -80,20 +80,13 @@ export function seedIfEmpty() {
     meetingId: uuid(),
     date: may14,
     attendeeIds: presentIds,
+    selectedAttendeeId: byName.get(SELECTED_MAY_14)!,
     topicType: null,
     book: null,
     chapter: null,
     topicText: null,
     createdBy: 'seed',
     createdAt: `${may14}T19:00:00.000Z`,
-  });
-
-  db.spins.push({
-    spinId: uuid(),
-    timestamp: `${may14}T19:30:00.000Z`,
-    selectedAttendeeId: byName.get(SELECTED_MAY_14)!,
-    eligibleAttendeeIds: presentIds,
-    triggeredBy: 'seed',
   });
 
   const thisThursday = thursdayOf(new Date());
