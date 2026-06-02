@@ -6,7 +6,6 @@ import authRoutes from './routes/auth.js';
 import attendeesRoutes from './routes/attendees.js';
 import meetingsRoutes from './routes/meetings.js';
 import statsRoutes from './routes/stats.js';
-import usersRoutes from './routes/users.js';
 import verseRoutes from './routes/verse.js';
 
 const app = express();
@@ -18,7 +17,6 @@ app.use('/api/auth', authRoutes);
 app.use('/api/attendees', attendeesRoutes);
 app.use('/api/meetings', meetingsRoutes);
 app.use('/api/stats', statsRoutes);
-app.use('/api/users', usersRoutes);
 app.use('/api/verse', verseRoutes);
 
 const PORT = Number(process.env.PORT ?? 4000);

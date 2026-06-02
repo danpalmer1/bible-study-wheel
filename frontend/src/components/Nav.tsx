@@ -1,8 +1,10 @@
 import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
+import { useSpinLock } from '../spin/SpinLockContext';
 
 export default function Nav() {
   const { user, logout } = useAuth();
+  const { spinning } = useSpinLock();
   const navigate = useNavigate();
 
   const linkCls = ({ isActive }: { isActive: boolean }) =>
@@ -10,7 +12,7 @@ export default function Nav() {
       isActive
         ? 'bg-woodland-primary text-woodland-bg'
         : 'text-woodland-ink hover:bg-woodland-surface-2'
-    }`;
+    } ${spinning ? 'pointer-events-none opacity-40' : ''}`;
 
   return (
     <header className="bg-woodland-surface border-b border-woodland-border">
@@ -22,30 +24,32 @@ export default function Nav() {
           Bible Study Wheel
         </Link>
         <nav className="flex items-center gap-1">
-          <NavLink to="/wheel" className={linkCls}>Wheel</NavLink>
-          <NavLink to="/stats" className={linkCls}>Stats</NavLink>
-          {user ? (
+          <NavLink to="/wheel" className={linkCls} tabIndex={spinning ? -1 : undefined}>
+            Wheel
+          </NavLink>
+          <NavLink to="/stats" className={linkCls} tabIndex={spinning ? -1 : undefined}>
+            Stats
+          </NavLink>
+          {user && (
             <>
               {user.role === 'admin' && (
-                <NavLink to="/admin" className={linkCls}>Admin</NavLink>
+                <NavLink to="/admin" className={linkCls} tabIndex={spinning ? -1 : undefined}>
+                  Admin
+                </NavLink>
               )}
               <span className="px-3 text-sm text-woodland-muted hidden sm:inline">
                 {user.name}
               </span>
               <button
+                disabled={spinning}
                 onClick={() => {
                   logout();
-                  navigate('/login');
+                  navigate('/admin-login');
                 }}
-                className="px-3 py-1.5 rounded-md text-sm text-woodland-muted hover:bg-woodland-surface-2 transition-colors"
+                className="px-3 py-1.5 rounded-md text-sm text-woodland-muted hover:bg-woodland-surface-2 transition-colors disabled:opacity-40 disabled:pointer-events-none"
               >
                 Logout
               </button>
-            </>
-          ) : (
-            <>
-              <NavLink to="/login" className={linkCls}>Login</NavLink>
-              <NavLink to="/signup" className={linkCls}>Sign up</NavLink>
             </>
           )}
         </nav>

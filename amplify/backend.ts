@@ -15,27 +15,20 @@ import {
   RestApi,
   type MethodOptions,
 } from 'aws-cdk-lib/aws-apigateway';
-import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
 import { Runtime } from 'aws-cdk-lib/aws-lambda';
 import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
 
 import { auth } from './auth/resource';
-import { preSignUpTrigger } from './functions/preSignUp/resource';
 
 const backend = defineBackend({
   auth,
-  preSignUpTrigger,
 });
 
-// Disable Cognito's self-confirm email flow. Default user pool config has
-// `email` in AutoVerifiedAttributes, which triggers a verification-code email
-// the user could enter to bypass admin approval. With this empty, signups
-// stay UNCONFIRMED with no code email sent until AdminConfirmSignUp.
-// AttributesRequireVerificationBeforeUpdate must be a subset of
-// AutoVerifiedAttributes, so clear both. Email-based password reset is
-// unavailable as a result; admin must reset passwords via
-// AdminSetUserPassword.
+// Signup is retired: the public app has no registration surface and admins are
+// created via the AWS console (AdminCreateUser). Lock the pool to admin-only
+// creation so the Cognito SignUp API can't be used to self-register either.
 const cfnUserPool = backend.auth.resources.cfnResources.cfnUserPool;
+cfnUserPool.adminCreateUserConfig = { allowAdminCreateUserOnly: true };
 cfnUserPool.autoVerifiedAttributes = [];
 cfnUserPool.userAttributeUpdateSettings = {
   attributesRequireVerificationBeforeUpdate: [],
@@ -84,9 +77,6 @@ const attendeesFn = apiHandler('attendeesFn', 'attendees');
 const meetingsFn = apiHandler('meetingsFn', 'meetings');
 const statsFn = apiHandler('statsFn', 'stats');
 const verseFn = apiHandler('verseFn', 'verse');
-const adminUsersFn = apiHandler('adminUsersFn', 'adminUsers', {
-  USER_POOL_ID: backend.auth.resources.userPool.userPoolId,
-});
 
 // ---------- DDB grants (least-privilege) ----------
 
@@ -97,31 +87,6 @@ attendeesTable.grantReadData(statsFn);
 meetingsTable.grantReadWriteData(meetingsFn);
 meetingsTable.grantReadData(statsFn);
 meetingsTable.grantReadData(verseFn);
-
-// adminUsers calls Cognito IDP scoped to this user pool.
-adminUsersFn.role!.addToPrincipalPolicy(
-  new PolicyStatement({
-    actions: [
-      'cognito-idp:ListUsers',
-      'cognito-idp:ListUsersInGroup',
-      'cognito-idp:AdminConfirmSignUp',
-      'cognito-idp:AdminAddUserToGroup',
-      'cognito-idp:AdminDeleteUser',
-    ],
-    resources: [backend.auth.resources.userPool.userPoolArn],
-  })
-);
-
-// preSignUp may optionally SES-notify the admin if ADMIN_NOTIFY_EMAIL is set
-// on the Lambda. Grant SES so it's ready when env vars are added later.
-// The trigger Lambda lives in its own stack (function); attaching the
-// policy from apiStack creates apiStack→function (one-way, no cycle).
-backend.preSignUpTrigger.resources.lambda.role!.addToPrincipalPolicy(
-  new PolicyStatement({
-    actions: ['ses:SendEmail', 'ses:SendRawEmail'],
-    resources: ['*'],
-  })
-);
 
 // ---------- REST API ----------
 
@@ -153,7 +118,6 @@ const integ = {
   meetings: new LambdaIntegration(meetingsFn),
   stats: new LambdaIntegration(statsFn),
   verse: new LambdaIntegration(verseFn),
-  adminUsers: new LambdaIntegration(adminUsersFn),
 };
 
 // /attendees, /attendees/{id}
@@ -173,17 +137,8 @@ meetingsRoot.addResource('{id}').addMethod('DELETE', integ.meetings, authed);
 // /stats — public alongside the wheel; no member-only data.
 api.root.addResource('stats').addMethod('GET', integ.stats, publicOpts);
 
-// /verse — public (banner renders on /login)
+// /verse — public (banner renders on the wheel/stats pages)
 api.root.addResource('verse').addMethod('GET', integ.verse, publicOpts);
-
-// /users (list approved), /users/pending, /users/{id}/{approve,reject,promote}
-const usersRoot = api.root.addResource('users');
-usersRoot.addMethod('GET', integ.adminUsers, authed);
-usersRoot.addResource('pending').addMethod('GET', integ.adminUsers, authed);
-const usersId = usersRoot.addResource('{id}');
-usersId.addResource('approve').addMethod('POST', integ.adminUsers, authed);
-usersId.addResource('reject').addMethod('POST', integ.adminUsers, authed);
-usersId.addResource('promote').addMethod('POST', integ.adminUsers, authed);
 
 // ---------- Outputs ----------
 
