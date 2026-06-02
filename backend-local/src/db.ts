@@ -19,8 +19,6 @@ export type Attendee = {
   attendeeId: string;
   name: string;
   active: boolean;
-  /** Optional link to a User. */
-  userId?: string | null;
   createdAt: string;
 };
 

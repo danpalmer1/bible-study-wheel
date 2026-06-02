@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api, Attendee } from '../api/client';
 import AttendeeSelector from '../components/AttendeeSelector';
 import Wheel from '../components/Wheel';
+import { useSpinLock } from '../spin/SpinLockContext';
 
 // The wheel is fully public and stateless — anyone can spin, results are
 // never persisted. The authoritative "who was picked for the meeting"
@@ -9,7 +10,11 @@ import Wheel from '../components/Wheel';
 export default function WheelPage() {
   const [attendees, setAttendees] = useState<Attendee[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [spinning, setSpinning] = useState(false);
+  // Winners are removed from the pool for the session and can't be re-added
+  // until reload, so a spin never lands on the same person twice.
+  const [spunIds, setSpunIds] = useState<Set<string>>(new Set());
+  // Spin state is shared via context so Nav can lock navigation mid-spin.
+  const { spinning, setSpinning } = useSpinLock();
   const [winnerIndex, setWinnerIndex] = useState(0);
   const [result, setResult] = useState<Attendee | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -32,6 +37,9 @@ export default function WheelPage() {
     };
   }, []);
 
+  // Safety net: never leave the nav locked if the page unmounts mid-spin.
+  useEffect(() => () => setSpinning(false), [setSpinning]);
+
   const eligibleAttendees = useMemo(
     () => attendees.filter((a) => selectedIds.has(a.attendeeId)),
     [attendees, selectedIds]
@@ -46,8 +54,17 @@ export default function WheelPage() {
   };
 
   const onStopSpinning = () => {
+    const winner = eligibleAttendees[winnerIndex] ?? null;
     setSpinning(false);
-    setResult(eligibleAttendees[winnerIndex] ?? null);
+    setResult(winner);
+    if (winner) {
+      setSpunIds((prev) => new Set(prev).add(winner.attendeeId));
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(winner.attendeeId);
+        return next;
+      });
+    }
   };
 
   if (loading) return <p className="text-woodland-muted">Loading…</p>;
@@ -60,6 +77,8 @@ export default function WheelPage() {
           attendees={attendees}
           selectedIds={selectedIds}
           onChange={setSelectedIds}
+          disabledIds={Array.from(spunIds)}
+          disabled={spinning}
         />
       </section>
 

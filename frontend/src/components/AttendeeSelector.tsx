@@ -5,11 +5,13 @@ export default function AttendeeSelector({
   selectedIds,
   onChange,
   disabledIds = [],
+  disabled = false,
 }: {
   attendees: Attendee[];
   selectedIds: Set<string>;
   onChange: (next: Set<string>) => void;
   disabledIds?: string[];
+  disabled?: boolean;
 }) {
   const toggle = (id: string) => {
     const next = new Set(selectedIds);
@@ -21,7 +23,7 @@ export default function AttendeeSelector({
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
       {attendees.map((a) => {
-        const disabled = disabledIds.includes(a.attendeeId);
+        const itemDisabled = disabled || disabledIds.includes(a.attendeeId);
         const checked = selectedIds.has(a.attendeeId);
         return (
           <label
@@ -31,7 +33,7 @@ export default function AttendeeSelector({
                 ? 'bg-woodland-primary/10 border-woodland-primary text-woodland-ink'
                 : 'bg-woodland-bg border-woodland-border text-woodland-ink'
             } ${
-              disabled
+              itemDisabled
                 ? 'opacity-50 cursor-not-allowed'
                 : 'hover:bg-woodland-surface-2'
             }`}
@@ -39,7 +41,7 @@ export default function AttendeeSelector({
             <input
               type="checkbox"
               checked={checked}
-              disabled={disabled}
+              disabled={itemDisabled}
               onChange={() => toggle(a.attendeeId)}
               className="accent-woodland-primary"
             />

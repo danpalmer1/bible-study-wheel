@@ -1,5 +1,5 @@
 import { FormEvent, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 
 export default function Login() {
@@ -17,7 +17,7 @@ export default function Login() {
     setSubmitting(true);
     try {
       await login(email, password);
-      navigate('/wheel');
+      navigate('/admin');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
     } finally {
@@ -73,12 +73,6 @@ export default function Login() {
         <button type="submit" disabled={submitting} className="btn-primary w-full">
           {submitting ? 'Logging in…' : 'Log in'}
         </button>
-        <p className="text-sm text-woodland-muted text-center">
-          No account?{' '}
-          <Link to="/signup" className="text-woodland-primary hover:underline">
-            Sign up
-          </Link>
-        </p>
       </form>
     </div>
   );

@@ -32,18 +32,9 @@ router.put('/:id', requireAuth, requireAdmin, (req, res) => {
   const db = load();
   const attendee = db.attendees.find((a) => a.attendeeId === req.params.id);
   if (!attendee) return res.status(404).json({ error: 'Not found' });
-  const { name, active, userId } = req.body ?? {};
+  const { name, active } = req.body ?? {};
   if (typeof name === 'string' && name.trim()) attendee.name = name.trim();
   if (typeof active === 'boolean') attendee.active = active;
-  if (userId !== undefined) {
-    if (userId === null) {
-      attendee.userId = null;
-    } else if (typeof userId === 'string') {
-      const user = db.users.find((u) => u.userId === userId);
-      if (!user) return res.status(400).json({ error: 'Unknown userId' });
-      attendee.userId = userId;
-    }
-  }
   save();
   res.json(attendee);
 });

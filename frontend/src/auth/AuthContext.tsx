@@ -7,12 +7,6 @@ type AuthState = {
   user: AuthUser | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  signup: (
-    email: string,
-    password: string,
-    firstName: string,
-    lastName: string
-  ) => Promise<void>;
   logout: () => Promise<void>;
 };
 
@@ -35,19 +29,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(u);
   };
 
-  const signup = async (
-    email: string,
-    password: string,
-    firstName: string,
-    lastName: string
-  ) => {
-    if (USE_AMPLIFY) {
-      await amplifySignup(email, password, firstName, lastName);
-    } else {
-      await api.post('/auth/signup', { email, password, firstName, lastName });
-    }
-  };
-
   const logout = async () => {
     if (USE_AMPLIFY) {
       await amplifyLogout();
@@ -58,7 +39,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, signup, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, logout }}>
       {children}
     </AuthContext.Provider>
   );
@@ -137,30 +118,6 @@ async function amplifyLogin(email: string, password: string): Promise<AuthUser> 
   const u = await loadAmplifyUser();
   if (!u) throw new Error('Signed in, but session could not be loaded');
   return u;
-}
-
-async function amplifySignup(
-  email: string,
-  password: string,
-  firstName: string,
-  lastName: string
-): Promise<void> {
-  const { signUp } = await import('aws-amplify/auth');
-  const fullName = `${firstName.trim()} ${lastName.trim()}`.trim();
-  await signUp({
-    username: email,
-    password,
-    options: {
-      // `name` (Cognito `name`) is required on the pool; given/family are
-      // optional but populated for new signups so display can prefer them.
-      userAttributes: {
-        email,
-        name: fullName,
-        given_name: firstName.trim(),
-        family_name: lastName.trim(),
-      },
-    },
-  });
 }
 
 async function amplifyLogout(): Promise<void> {

@@ -2,7 +2,7 @@
 
 Walks a brand-new AWS user from "I don't have an account" to "ready to run `npx ampx sandbox`." Estimated 20–30 min — Gen 2 has less ceremony than Gen 1 (no `amplify configure`, no separate IAM user for Amplify).
 
-Cost note: every service in this stack has a generous free tier (Cognito, DynamoDB, Lambda, API Gateway, SES, Amplify Hosting). Expected monthly bill: ~$0 for the first year, a few dollars after. Set up a billing alarm anyway (step 4).
+Cost note: every service in this stack has a generous free tier (Cognito, DynamoDB, Lambda, API Gateway, Amplify Hosting). Expected monthly bill: ~$0 for the first year, a few dollars after. Set up a billing alarm anyway (step 4).
 
 ---
 
@@ -58,18 +58,7 @@ aws sts get-caller-identity
 
 You should see your IAM user ARN. **This is all the auth Amplify Gen 2 needs** — no `amplify configure` step.
 
-## 6. Verify a sender email in SES (optional)
-
-The `preSignUpTrigger` Lambda can optionally email you when someone signs up. Skip this section if you don't want notifications — the gate still works without it. To enable:
-
-Console → **Amazon SES** → region selector top-right = **us-east-1** → **Identities** → **Create identity**:
-
-1. **Email address**, your gmail/etc., **Create identity**.
-2. Click the link AWS emails you.
-
-After your first sandbox deploy, set `ADMIN_NOTIFY_EMAIL` and `FROM_EMAIL` env vars on the `preSignUpTrigger` Lambda in the console.
-
-## 7. Sanity check
+## 6. Sanity check
 
 ```pwsh
 aws s3 ls                  # empty bucket list, confirms creds work
@@ -87,7 +76,7 @@ npx ampx sandbox           # provisions your personal dev stack
 `npx ampx sandbox` will:
 - Bootstrap CDK in your AWS account (first time only — takes ~3 min).
 - Synthesize CloudFormation from `amplify/backend.ts`.
-- Deploy auth + 3 DDB tables + 6 Lambdas + API Gateway.
+- Deploy auth + 2 DDB tables + 4 Lambdas + API Gateway.
 - Write `amplify_outputs.json` at the repo root.
 - Keep watching `amplify/` for hot-redeploy.
 
@@ -99,25 +88,29 @@ cd frontend
 npm run dev                # opens at http://localhost:5173, talking to AWS
 ```
 
-## 8. Bootstrap yourself as admin (one-time)
+## 7. Bootstrap yourself as admin (one-time)
 
-The PreSignUp trigger leaves new users in UNCONFIRMED state until an admin approves. You don't have an admin yet, so:
-
-1. Sign up via the app UI (`http://localhost:5173/signup`).
-2. From PowerShell:
+Self-signup is disabled at the pool level (`AllowAdminCreateUserOnly`), so there's no registration surface in the app — admins are the only accounts and you create each one from the CLI. From PowerShell:
 
 ```pwsh
 $POOL_ID = (Get-Content amplify_outputs.json | ConvertFrom-Json).auth.user_pool_id
-aws cognito-idp admin-confirm-sign-up `
+aws cognito-idp admin-create-user `
   --user-pool-id $POOL_ID `
-  --username your-email@example.com
+  --username your-email@example.com `
+  --user-attributes Name=email,Value=your-email@example.com Name=email_verified,Value=true `
+  --message-action SUPPRESS
+aws cognito-idp admin-set-user-password `
+  --user-pool-id $POOL_ID `
+  --username your-email@example.com `
+  --password 'YourStrongPassw0rd!' `
+  --permanent
 aws cognito-idp admin-add-user-to-group `
   --user-pool-id $POOL_ID `
   --username your-email@example.com `
   --group-name admin
 ```
 
-3. Refresh the app and log in. You should see Admin in the nav. Subsequent users go through the in-app Approve/Reject flow.
+Then sign in at the unlisted **`/admin-login`** route (`http://localhost:5173/admin-login`). You should land on the Admin panel. Repeat these commands for any additional admins.
 
 ---
 
@@ -138,4 +131,3 @@ Once the sandbox flow works end-to-end:
 - **"User is not authorized to perform: sts:AssumeRole"** → your IAM user is missing `AdministratorAccess`. Re-attach in IAM console.
 - **`npm run sync-config` says file missing** → sandbox hasn't finished. Watch the first terminal for "Deployment completed."
 - **Frontend logs `[amplify] VITE_USE_AMPLIFY=true but ...`** → you forgot to run `npm run sync-config`, or you're running the frontend without restarting after env var changes.
-- **CloudWatch shows the preSignUp Lambda erroring on SES** → either set `ADMIN_NOTIFY_EMAIL` to a verified address or unset it entirely (handler skips SES when unset).

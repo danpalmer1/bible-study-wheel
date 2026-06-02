@@ -1,22 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
-import {
-  api,
-  ApprovedUser,
-  Attendee,
-  Meeting,
-  MeetingTopicType,
-  PendingUser,
-} from '../api/client';
+import { api, Attendee, Meeting, MeetingTopicType } from '../api/client';
 import { OT_BOOKS, NT_BOOKS, findBook } from '../data/bibleBooks';
 
-type Tab = 'pending' | 'attendees' | 'meetings';
+type Tab = 'attendees' | 'meetings';
 
 export default function AdminPage() {
-  const [tab, setTab] = useState<Tab>('pending');
+  const [tab, setTab] = useState<Tab>('attendees');
   return (
     <div>
       <div className="flex gap-2 mb-5">
-        {(['pending', 'attendees', 'meetings'] as const).map((t) => (
+        {(['attendees', 'meetings'] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -26,80 +19,23 @@ export default function AdminPage() {
                 : 'bg-woodland-surface-2 text-woodland-ink hover:bg-woodland-border'
             }`}
           >
-            {t === 'pending' ? 'Pending users' : t}
+            {t}
           </button>
         ))}
       </div>
-      {tab === 'pending' && <PendingUsersTab />}
       {tab === 'attendees' && <AttendeesTab />}
       {tab === 'meetings' && <MeetingsTab />}
     </div>
   );
 }
 
-function PendingUsersTab() {
-  const [users, setUsers] = useState<PendingUser[]>([]);
-  const [error, setError] = useState<string | null>(null);
-
-  const refresh = () => {
-    api.get<PendingUser[]>('/users/pending').then(setUsers).catch((e) => setError(e.message));
-  };
-  useEffect(refresh, []);
-
-  const approve = async (id: string) => {
-    await api.post(`/users/${id}/approve`);
-    refresh();
-  };
-  const reject = async (id: string) => {
-    await api.post(`/users/${id}/reject`);
-    refresh();
-  };
-
-  return (
-    <div className="card">
-      <div className="px-5 py-4 border-b border-woodland-border font-semibold">Pending users</div>
-      {error && <p className="px-5 py-3 text-woodland-danger text-sm">{error}</p>}
-      {users.length === 0 && (
-        <p className="px-5 py-5 text-woodland-muted text-sm">No pending users.</p>
-      )}
-      <ul>
-        {users.map((u) => (
-          <li
-            key={u.userId}
-            className="px-5 py-3 border-t border-woodland-border flex items-center justify-between"
-          >
-            <div>
-              <div className="font-medium">{u.name}</div>
-              <div className="text-xs text-woodland-muted">{u.email}</div>
-            </div>
-            <div className="flex gap-2">
-              <button onClick={() => approve(u.userId)} className="btn-primary py-1.5 px-3">
-                Approve
-              </button>
-              <button onClick={() => reject(u.userId)} className="btn-secondary py-1.5 px-3">
-                Reject
-              </button>
-            </div>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
 function AttendeesTab() {
   const [attendees, setAttendees] = useState<Attendee[]>([]);
-  const [users, setUsers] = useState<ApprovedUser[]>([]);
   const [newName, setNewName] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   const refresh = () => {
-    Promise.all([api.get<Attendee[]>('/attendees'), api.get<ApprovedUser[]>('/users')])
-      .then(([att, usr]) => {
-        setAttendees(att);
-        setUsers(usr);
-      })
-      .catch((e) => setError(e.message));
+    api.get<Attendee[]>('/attendees').then(setAttendees).catch((e) => setError(e.message));
   };
   useEffect(refresh, []);
 
@@ -118,23 +54,6 @@ function AttendeesTab() {
     if (!name || name === a.name) return;
     await api.put(`/attendees/${a.attendeeId}`, { name });
     refresh();
-  };
-  const link = async (a: Attendee, userId: string | null) => {
-    try {
-      await api.put(`/attendees/${a.attendeeId}`, { userId });
-      refresh();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Link failed');
-    }
-  };
-  const promote = async (u: ApprovedUser) => {
-    if (!confirm(`Promote ${u.name} (${u.email}) to admin?`)) return;
-    try {
-      await api.post(`/users/${u.userId}/promote`);
-      refresh();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Promote failed');
-    }
   };
 
   return (
@@ -158,70 +77,27 @@ function AttendeesTab() {
       </form>
       {error && <p className="px-5 py-3 text-woodland-danger text-sm">{error}</p>}
       <ul>
-        {attendees.map((a) => {
-          const linkedUser = a.userId ? users.find((u) => u.userId === a.userId) ?? null : null;
-          // Available users: not already linked to a different attendee.
-          const linkable = users.filter(
-            (u) =>
-              !attendees.some(
-                (other) => other.attendeeId !== a.attendeeId && other.userId === u.userId
-              )
-          );
-          const canPromote = linkedUser && linkedUser.role !== 'admin';
-          return (
-            <li
-              key={a.attendeeId}
-              className="px-5 py-2.5 border-t border-woodland-border flex items-center justify-between gap-3 flex-wrap"
-            >
-              <div className="min-w-[180px]">
-                <div className={a.active ? '' : 'text-woodland-subtle italic'}>{a.name}</div>
-                <div className="text-xs text-woodland-muted">
-                  {linkedUser ? (
-                    <>
-                      Linked: {linkedUser.name} ({linkedUser.email})
-                      {linkedUser.role === 'admin' && (
-                        <span className="ml-1 text-woodland-accent">· admin</span>
-                      )}
-                    </>
-                  ) : (
-                    'Not linked'
-                  )}
-                </div>
-              </div>
-              <div className="flex items-center gap-3 text-sm flex-wrap">
-                <select
-                  value={a.userId ?? ''}
-                  onChange={(e) => link(a, e.target.value || null)}
-                  className="input py-1 text-xs"
-                >
-                  <option value="">— Not linked —</option>
-                  {linkable.map((u) => (
-                    <option key={u.userId} value={u.userId}>
-                      {u.name} ({u.email})
-                    </option>
-                  ))}
-                </select>
-                {canPromote && (
-                  <button
-                    onClick={() => promote(linkedUser!)}
-                    className="text-woodland-primary hover:underline"
-                  >
-                    Promote
-                  </button>
-                )}
-                <button onClick={() => rename(a)} className="text-woodland-primary hover:underline">
-                  Rename
-                </button>
-                <button
-                  onClick={() => toggleActive(a)}
-                  className="text-woodland-muted hover:underline"
-                >
-                  {a.active ? 'Deactivate' : 'Reactivate'}
-                </button>
-              </div>
-            </li>
-          );
-        })}
+        {attendees.map((a) => (
+          <li
+            key={a.attendeeId}
+            className="px-5 py-2.5 border-t border-woodland-border flex items-center justify-between gap-3 flex-wrap"
+          >
+            <div className={`min-w-[180px] ${a.active ? '' : 'text-woodland-subtle italic'}`}>
+              {a.name}
+            </div>
+            <div className="flex items-center gap-3 text-sm flex-wrap">
+              <button onClick={() => rename(a)} className="text-woodland-primary hover:underline">
+                Rename
+              </button>
+              <button
+                onClick={() => toggleActive(a)}
+                className="text-woodland-muted hover:underline"
+              >
+                {a.active ? 'Deactivate' : 'Reactivate'}
+              </button>
+            </div>
+          </li>
+        ))}
       </ul>
     </div>
   );
@@ -409,8 +285,14 @@ function MeetingsTab() {
 
   const togglePresent = (id: string) => {
     const next = new Set(presentIds);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
+    if (next.has(id)) {
+      next.delete(id);
+      // The wheel only picks present people, so an absent attendee can't be
+      // the selection — clear it if we just unchecked them.
+      if (selectedAttendeeId === id) setSelectedAttendeeId(null);
+    } else {
+      next.add(id);
+    }
     setPresentIds(next);
   };
 
@@ -516,9 +398,11 @@ function MeetingsTab() {
               className="input py-1.5 w-auto"
             >
               <option value="">— None —</option>
-              {visibleAttendees.map((a) => (
-                <option key={a.attendeeId} value={a.attendeeId}>{a.name}</option>
-              ))}
+              {visibleAttendees
+                .filter((a) => presentIds.has(a.attendeeId))
+                .map((a) => (
+                  <option key={a.attendeeId} value={a.attendeeId}>{a.name}</option>
+                ))}
             </select>
           </div>
           <button onClick={submit} disabled={busy} className="btn-primary">

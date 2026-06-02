@@ -43,10 +43,6 @@ exports.handler = async (event) => {
         updates.push('active = :a');
         values[':a'] = body.active;
       }
-      if (body.userId !== undefined) {
-        updates.push('userId = :u');
-        values[':u'] = body.userId === null ? null : String(body.userId);
-      }
       if (updates.length === 0) return ok(existing.Item);
       const result = await doc.send(
         new UpdateCommand({

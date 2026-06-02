@@ -9,6 +9,21 @@ Versioning is loose pre-1.0 — minor versions may include breaking changes.
 
 _Add new entries here as work lands; promote to a versioned section when shipping._
 
+### Removed — Retire the signup / member system
+- Self-registration is gone end-to-end. With the wheel and stats both public, a member account granted nothing, so the entire signup/approval/linking surface is deleted.
+- Frontend: removed `Signup.tsx` + the `/signup` route, the public Login/Sign up nav buttons, `AuthContext.signup`/`amplifySignup`, the Admin → Pending users tab, and the attendee→user link + promote-to-admin UI. The login route is now the unlisted `/admin-login` (no nav entry; `ProtectedRoute` and logout redirect there). `PendingUser`, `ApprovedUser`, and `Attendee.userId` dropped from `api/client.ts`.
+- `backend-local`: removed `POST /auth/signup`, the entire `routes/users.ts` (pending/approve/reject/promote/list) + its mount, the `userId` link handling in `PUT /attendees/{id}`, and `Attendee.userId` from `db.ts`. Login + the seeded admin are untouched.
+- `backend-aws` / amplify: deleted `functions/adminUsers` and the `preSignUp` notification trigger (handler + `defineFunction` + auth wiring + SES IAM grant), the `/users*` API routes, and the `userId` write in the attendees handler. `amplify/backend.ts` sets `AllowAdminCreateUserOnly` on the user pool so the Cognito SignUp API can't self-register either. New admins are created via `admin-create-user`.
+
+### Fixed — Wheel no longer corrupts when inputs change mid-spin
+- `frontend/src/spin/SpinLockContext.tsx` (new) — a `spinning` flag hoisted above the router. `WheelPage` drives it; `Nav` disables all links + Logout while a spin runs, and `AttendeeSelector` gains a `disabled` prop so participants can't be toggled mid-spin. Both were the triggers that reshuffled or unmounted the wheel during its animation. A page-unmount cleanup clears the flag so the nav can never get stuck locked.
+
+### Changed — Wheel drops the winner after each spin
+- `frontend/src/pages/WheelPage.tsx` — when a spin lands, the winner is removed from the eligible pool for the session (unchecked + disabled via `disabledIds`) so a re-spin can't pick the same person until reload. Restores the pre-v0.5.0 auto-exclude behavior, client-side only (wheel stays stateless).
+
+### Fixed — Meeting "Selected by wheel" can't be an absent attendee
+- `frontend/src/pages/AdminPage.tsx` (`MeetingsTab`) — the "Selected by wheel" dropdown now lists only attendees checked present, and un-checking the selected person clears the selection. Prevents recording a wheel pick for someone not marked as attending (which would feed a contradictory record into stats).
+
 ### Added — v0.5.1 Stats page is now public
 - `frontend/src/App.tsx` — drop the `ProtectedRoute` wrapper on `/stats` so anonymous visitors land on the table.
 - `frontend/src/components/Nav.tsx` — `Stats` link now renders in both logged-in and logged-out nav states (matches the public wheel).

@@ -56,16 +56,7 @@ export type Attendee = {
   attendeeId: string;
   name: string;
   active: boolean;
-  /** Optional link to a Cognito (or local) user account. */
-  userId?: string | null;
   createdAt: string;
-};
-
-export type ApprovedUser = {
-  userId: string;
-  email: string;
-  name: string;
-  role: 'admin' | 'member';
 };
 
 export type MeetingTopicType = 'fourTs' | 'reading' | 'presentation';
@@ -106,13 +97,6 @@ export type Stats = {
     date: string;
     selectedAttendeeId: string;
   } | null;
-};
-
-export type PendingUser = {
-  userId: string;
-  email: string;
-  name: string;
-  createdAt: string;
 };
 
 export type AuthUser = {
