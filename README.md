@@ -35,33 +35,22 @@ bible-study-wheel/
 └── backend-aws/     # Lambda equivalents (for deploy)
 ```
 
-## Deploy to AWS (Amplify)
+## Deploy to AWS (Amplify Gen 2)
 
-See [backend-aws/README.md](backend-aws/README.md). Short version:
-1. Install Amplify CLI, `amplify configure`, `amplify init`
-2. `amplify add auth` (with `admin` + `member` groups, `PreSignUp` trigger)
-3. `amplify add api` (REST, Cognito authorizer)
-4. `amplify add storage` (DynamoDB: Attendees, Meetings, Spins)
-5. Copy `backend-aws/functions/*` into Amplify's generated function folders
-6. Verify admin email in SES
-7. `amplify push` then `amplify add hosting && amplify publish`
+Full first-time walkthrough in [backend-aws/AWS_SETUP.md](backend-aws/AWS_SETUP.md). Short version:
 
-First admin: after deploy, manually add yourself to the `admin` Cognito group in the AWS Console (bootstrap step).
+1. `aws configure` with an IAM admin user. Gen 2 talks to AWS via your CLI credentials directly — no `amplify configure`, no separate Amplify IAM user.
+2. From the repo root: `npm install`, then `npx ampx sandbox` to provision your personal dev stack. This deploys Cognito, two DynamoDB tables, and the four API Lambdas defined in [`amplify/backend.ts`](amplify/backend.ts), and writes `amplify_outputs.json` to the repo root.
+3. `npm run sync-config` copies the relevant values into `frontend/.env.local`. Then `cd frontend && npm run dev` runs the SPA locally against the sandbox backend.
+4. **Production deploy:** in the AWS Console, connect the repo to Amplify Hosting and pick the `master` branch. The `amplify.yml` build spec runs `npx ampx pipeline-deploy --branch master` (CDK-deploys the backend stack) followed by `vite build` (uploads the frontend to Amplify's CDN). Subsequent pushes to `master` redeploy automatically.
+
+Admins (only accounts in the system): self-signup is disabled at the pool level (`AllowAdminCreateUserOnly`), so create each admin via `aws cognito-idp admin-create-user` + `admin-add-user-to-group --group-name admin` against the pool ID from `amplify_outputs.json`, then sign in at the unlisted `/admin-login` route. Full commands in [AWS_SETUP.md](backend-aws/AWS_SETUP.md).
 
 ## Known bugs
 
-- **Admin sign-up notification email not firing.** Multiple users have signed up but no notification email arrived at `xdanielpalmerx@gmail.com`, despite SES being set up and the sender identity verified. Things to check: `ADMIN_NOTIFY_EMAIL` and `FROM_EMAIL` env vars on the `preSignUpTrigger` Lambda, whether SES is still in sandbox mode (in sandbox, the *recipient* address also has to be verified), the Lambda's IAM permission for `ses:SendEmail`, and the CloudWatch logs for `preSignUpTrigger` to see if the SES call is silently throwing and being swallowed.
-- Bible verse selection: verify it pulls from *next week's* meeting, not the most recent past one. Example: if today is 2026-05-22 (Friday), the displayed verse should be for 2026-05-28's meeting, not 2026-05-21's.
+- **Verse banner reportedly showing previous week's reading.** Observed on a local preview: banner shows `3 John 1:X` and the reader recognized 3 John as the *previous* week's reading. Investigation of the local code path is inconclusive — given today=2026-05-26 (Tue), `nextThursday()` correctly returns 2026-05-28, and the local `db.json` meeting for 2026-05-28 has `book: "3-john", chapter: 1`, so the banner output matches the data. Either (a) the local schedule doesn't match the actual group schedule (someone manually entered the wrong week via Admin → Meetings → Upcoming), or (b) there's a subtler bug not reproducible from the local data alone. Next time it appears: check what date the upcoming meeting in DDB/db.json is actually set to, vs the date the banner thinks is "this Thursday" (`weekOf` in the `/api/verse` response).
 
 ## Future changes
 
-- Enter key activates the add/save button in text fields (forms should submit on Enter, not require mouse click).
-- Add favicon / app icon to the website.
-- Sign up: add show/hide password toggle.
-- Sign up: separate first name and last name fields (currently one combined name field).
-- Open up auth so the site is public-facing — anonymous visitors can land on the page without signing in.
-- Wheel defaults to **trial spin mode** for guests: anyone can spin to try it out, but trial spins are not persisted and do not affect attendee stats.
-- Official spins for now: **unlimited, open to any logged-in user.** No rate-limiting, no admin gating, no per-meeting unlock. Revisit if data pollution becomes a real problem — the earlier ideas (admin-only, member+confirm, per-meeting unlock, rate-limit+audit) are parked for that future revisit.
-- **Meeting log: record and display who was selected by the wheel spin.** Each meeting entry should show the selected attendee for that meeting's official spin alongside attendance and topic info.
-- **User management within Attendees** (separate feature). Admin-only UI to (a) link an existing attendee record to a Cognito user account, and (b) promote a linked user to admin (adds them to the `admin` Cognito group). Lets members who sign up be tied to their historical roster entry rather than creating duplicates.
+- **GitHub Actions PR validation (hybrid CI).** Add `.github/workflows/ci.yml` that runs on `pull_request` against `master` / `release/**`: typechecks `amplify/`, runs `npm --prefix frontend run build` (which does `tsc -b && vite build`), and typechecks `backend-local/`. Amplify Hosting keeps owning the actual deploy from `master`; this just gates PRs so regressions don't reach the release branch. Free for both public and private repos (2,000 minutes/month on private, unlimited on public). Restores the `[skip ci]` convention as a side effect.
 - Future / out-of-scope idea: turn this into a **multi-tenant platform** where any group can spin up their own instance with their own roster, attendees, and stats — basically this app becomes one "tenant" inside a larger portal. Keeping the scope of *this* app small (single group, single DB) so it can act as the reference implementation / prototype for what a single tenant would look like inside that bigger system.

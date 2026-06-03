@@ -1,14 +1,20 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api, Attendee, Spin } from '../api/client';
+import { api, Attendee } from '../api/client';
 import AttendeeSelector from '../components/AttendeeSelector';
 import Wheel from '../components/Wheel';
+import { useSpinLock } from '../spin/SpinLockContext';
 
+// The wheel is fully public and stateless — anyone can spin, results are
+// never persisted. The authoritative "who was picked for the meeting"
+// record lives in the admin meeting-log entry form, not here.
 export default function WheelPage() {
   const [attendees, setAttendees] = useState<Attendee[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [lastSpin, setLastSpin] = useState<Spin | null>(null);
-  const [spinning, setSpinning] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
+  // Winners are removed from the pool for the session and can't be re-added
+  // until reload, so a spin never lands on the same person twice.
+  const [spunIds, setSpunIds] = useState<Set<string>>(new Set());
+  // Spin state is shared via context so Nav can lock navigation mid-spin.
+  const { spinning, setSpinning } = useSpinLock();
   const [winnerIndex, setWinnerIndex] = useState(0);
   const [result, setResult] = useState<Attendee | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -16,21 +22,13 @@ export default function WheelPage() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([
-      api.get<Attendee[]>('/attendees'),
-      api.get<Spin | null>('/spins/latest'),
-    ])
-      .then(([attendeeList, latest]) => {
+    api
+      .get<Attendee[]>('/attendees')
+      .then((attendeeList) => {
         if (cancelled) return;
         const active = attendeeList.filter((a) => a.active);
         setAttendees(active);
-        setLastSpin(latest);
-        const initial = new Set(
-          active
-            .filter((a) => !latest || a.attendeeId !== latest.selectedAttendeeId)
-            .map((a) => a.attendeeId)
-        );
-        setSelectedIds(initial);
+        setSelectedIds(new Set(active.map((a) => a.attendeeId)));
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
@@ -39,63 +37,48 @@ export default function WheelPage() {
     };
   }, []);
 
+  // Safety net: never leave the nav locked if the page unmounts mid-spin.
+  useEffect(() => () => setSpinning(false), [setSpinning]);
+
   const eligibleAttendees = useMemo(
     () => attendees.filter((a) => selectedIds.has(a.attendeeId)),
     [attendees, selectedIds]
   );
 
-  const lastSpunDisabled = useMemo(
-    () => (lastSpin && eligibleAttendees.length > 2 ? [lastSpin.selectedAttendeeId] : []),
-    [lastSpin, eligibleAttendees.length]
-  );
-
-  const spin = async () => {
-    if (eligibleAttendees.length === 0) return;
+  const spin = () => {
+    if (eligibleAttendees.length === 0 || spinning) return;
     setError(null);
     setResult(null);
-    setSubmitting(true);
-    const idx = Math.floor(Math.random() * eligibleAttendees.length);
-    try {
-      const winner = eligibleAttendees[idx];
-      const spinResp = await api.post<Spin>('/spins', {
-        selectedAttendeeId: winner.attendeeId,
-        eligibleAttendeeIds: eligibleAttendees.map((a) => a.attendeeId),
-      });
-      setLastSpin(spinResp);
-      setWinnerIndex(idx);
-      setSpinning(true);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Spin failed');
-    } finally {
-      setSubmitting(false);
-    }
+    setWinnerIndex(Math.floor(Math.random() * eligibleAttendees.length));
+    setSpinning(true);
   };
 
   const onStopSpinning = () => {
+    const winner = eligibleAttendees[winnerIndex] ?? null;
     setSpinning(false);
-    setResult(eligibleAttendees[winnerIndex] ?? null);
+    setResult(winner);
+    if (winner) {
+      setSpunIds((prev) => new Set(prev).add(winner.attendeeId));
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(winner.attendeeId);
+        return next;
+      });
+    }
   };
 
   if (loading) return <p className="text-woodland-muted">Loading…</p>;
-
-  const lastSpinName =
-    lastSpin && attendees.find((a) => a.attendeeId === lastSpin.selectedAttendeeId)?.name;
 
   return (
     <div className="grid md:grid-cols-2 gap-6">
       <section className="card p-5">
         <h2 className="text-lg font-semibold mb-3">Who&apos;s in?</h2>
-        {lastSpunDisabled.length > 0 && lastSpinName && (
-          <p className="text-xs text-woodland-muted mb-3">
-            <strong className="text-woodland-ink">{lastSpinName}</strong> was selected last and is
-            auto-excluded. Re-enable manually if needed.
-          </p>
-        )}
         <AttendeeSelector
           attendees={attendees}
           selectedIds={selectedIds}
           onChange={setSelectedIds}
-          disabledIds={lastSpunDisabled}
+          disabledIds={Array.from(spunIds)}
+          disabled={spinning}
         />
       </section>
 
@@ -111,10 +94,10 @@ export default function WheelPage() {
         </div>
         <button
           onClick={spin}
-          disabled={submitting || spinning || eligibleAttendees.length === 0}
+          disabled={spinning || eligibleAttendees.length === 0}
           className="btn-primary mt-5 px-6"
         >
-          {submitting ? 'Recording…' : spinning ? 'Spinning…' : 'Official spin'}
+          {spinning ? 'Spinning…' : 'Spin'}
         </button>
         {result && !spinning && (
           <div className="mt-4 text-lg font-serif">

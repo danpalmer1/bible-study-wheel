@@ -23,18 +23,28 @@ exports.handler = async (event) => {
     }
     if (method === 'POST') {
       const body = JSON.parse(event.body || '{}');
-      const { date, attendeeIds, topicType, book, chapter, topicText } = body;
+      const { date, attendeeIds, selectedAttendeeId, topicType, book, chapter, topicText } = body;
       if (!date) return err('date required');
       if (topicType !== undefined && topicType !== null && !VALID_TYPES.includes(topicType)) {
         return err('Invalid topicType');
       }
-      if (attendeeIds !== undefined) {
-        if (!Array.isArray(attendeeIds)) return err('attendeeIds must be array');
+      let knownAttendeeIds = null;
+      const loadKnown = async () => {
+        if (knownAttendeeIds) return knownAttendeeIds;
         const known = await doc.send(
           new ScanCommand({ TableName: ATTENDEES_TABLE, ProjectionExpression: 'attendeeId' })
         );
-        const ids = new Set((known.Items ?? []).map((a) => a.attendeeId));
+        knownAttendeeIds = new Set((known.Items ?? []).map((a) => a.attendeeId));
+        return knownAttendeeIds;
+      };
+      if (attendeeIds !== undefined) {
+        if (!Array.isArray(attendeeIds)) return err('attendeeIds must be array');
+        const ids = await loadKnown();
         if (!attendeeIds.every((i) => ids.has(i))) return err('Unknown attendee id');
+      }
+      if (selectedAttendeeId !== undefined && selectedAttendeeId !== null) {
+        const ids = await loadKnown();
+        if (!ids.has(selectedAttendeeId)) return err('Unknown selectedAttendeeId');
       }
 
       const existing = await doc.send(
@@ -51,6 +61,7 @@ exports.handler = async (event) => {
           meetingId: randomUUID(),
           date: String(date),
           attendeeIds: [],
+          selectedAttendeeId: null,
           topicType: null,
           book: null,
           chapter: null,
@@ -60,6 +71,7 @@ exports.handler = async (event) => {
         };
       }
       if (attendeeIds !== undefined) meeting.attendeeIds = attendeeIds;
+      if (selectedAttendeeId !== undefined) meeting.selectedAttendeeId = selectedAttendeeId || null;
       if (topicType !== undefined) {
         meeting.topicType = topicType || null;
         meeting.book = null;

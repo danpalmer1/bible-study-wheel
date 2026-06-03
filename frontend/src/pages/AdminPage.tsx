@@ -1,21 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
-import {
-  api,
-  Attendee,
-  Meeting,
-  MeetingTopicType,
-  PendingUser,
-} from '../api/client';
+import { api, Attendee, Meeting, MeetingTopicType } from '../api/client';
 import { OT_BOOKS, NT_BOOKS, findBook } from '../data/bibleBooks';
 
-type Tab = 'pending' | 'attendees' | 'meetings';
+type Tab = 'attendees' | 'meetings';
 
 export default function AdminPage() {
-  const [tab, setTab] = useState<Tab>('pending');
+  const [tab, setTab] = useState<Tab>('attendees');
   return (
     <div>
       <div className="flex gap-2 mb-5">
-        {(['pending', 'attendees', 'meetings'] as const).map((t) => (
+        {(['attendees', 'meetings'] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -25,63 +19,12 @@ export default function AdminPage() {
                 : 'bg-woodland-surface-2 text-woodland-ink hover:bg-woodland-border'
             }`}
           >
-            {t === 'pending' ? 'Pending users' : t}
+            {t}
           </button>
         ))}
       </div>
-      {tab === 'pending' && <PendingUsersTab />}
       {tab === 'attendees' && <AttendeesTab />}
       {tab === 'meetings' && <MeetingsTab />}
-    </div>
-  );
-}
-
-function PendingUsersTab() {
-  const [users, setUsers] = useState<PendingUser[]>([]);
-  const [error, setError] = useState<string | null>(null);
-
-  const refresh = () => {
-    api.get<PendingUser[]>('/users/pending').then(setUsers).catch((e) => setError(e.message));
-  };
-  useEffect(refresh, []);
-
-  const approve = async (id: string) => {
-    await api.post(`/users/${id}/approve`);
-    refresh();
-  };
-  const reject = async (id: string) => {
-    await api.post(`/users/${id}/reject`);
-    refresh();
-  };
-
-  return (
-    <div className="card">
-      <div className="px-5 py-4 border-b border-woodland-border font-semibold">Pending users</div>
-      {error && <p className="px-5 py-3 text-woodland-danger text-sm">{error}</p>}
-      {users.length === 0 && (
-        <p className="px-5 py-5 text-woodland-muted text-sm">No pending users.</p>
-      )}
-      <ul>
-        {users.map((u) => (
-          <li
-            key={u.userId}
-            className="px-5 py-3 border-t border-woodland-border flex items-center justify-between"
-          >
-            <div>
-              <div className="font-medium">{u.name}</div>
-              <div className="text-xs text-woodland-muted">{u.email}</div>
-            </div>
-            <div className="flex gap-2">
-              <button onClick={() => approve(u.userId)} className="btn-primary py-1.5 px-3">
-                Approve
-              </button>
-              <button onClick={() => reject(u.userId)} className="btn-secondary py-1.5 px-3">
-                Reject
-              </button>
-            </div>
-          </li>
-        ))}
-      </ul>
     </div>
   );
 }
@@ -115,26 +58,34 @@ function AttendeesTab() {
 
   return (
     <div className="card">
-      <div className="px-5 py-3 border-b border-woodland-border flex gap-2">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          add();
+        }}
+        className="px-5 py-3 border-b border-woodland-border flex gap-2"
+      >
         <input
           value={newName}
           onChange={(e) => setNewName(e.target.value)}
           placeholder="New attendee name"
           className="input flex-1 py-1.5"
         />
-        <button onClick={add} className="btn-primary py-1.5">
+        <button type="submit" className="btn-primary py-1.5">
           Add
         </button>
-      </div>
+      </form>
       {error && <p className="px-5 py-3 text-woodland-danger text-sm">{error}</p>}
       <ul>
         {attendees.map((a) => (
           <li
             key={a.attendeeId}
-            className="px-5 py-2.5 border-t border-woodland-border flex items-center justify-between"
+            className="px-5 py-2.5 border-t border-woodland-border flex items-center justify-between gap-3 flex-wrap"
           >
-            <span className={a.active ? '' : 'text-woodland-subtle italic'}>{a.name}</span>
-            <div className="flex gap-3 text-sm">
+            <div className={`min-w-[180px] ${a.active ? '' : 'text-woodland-subtle italic'}`}>
+              {a.name}
+            </div>
+            <div className="flex items-center gap-3 text-sm flex-wrap">
               <button onClick={() => rename(a)} className="text-woodland-primary hover:underline">
                 Rename
               </button>
@@ -305,6 +256,7 @@ function MeetingsTab() {
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [date, setDate] = useState(() => toISODate(new Date()));
   const [presentIds, setPresentIds] = useState<Set<string>>(new Set());
+  const [selectedAttendeeId, setSelectedAttendeeId] = useState<string | null>(null);
   const [recordTopic, setRecordTopic] = useState<TopicDraft>(emptyDraft());
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -322,6 +274,7 @@ function MeetingsTab() {
   useEffect(() => {
     const existing = meetings.find((m) => m.date === date);
     setPresentIds(new Set(existing?.attendeeIds ?? []));
+    setSelectedAttendeeId(existing?.selectedAttendeeId ?? null);
     setRecordTopic(draftFromMeeting(existing));
   }, [date, meetings]);
 
@@ -332,8 +285,14 @@ function MeetingsTab() {
 
   const togglePresent = (id: string) => {
     const next = new Set(presentIds);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
+    if (next.has(id)) {
+      next.delete(id);
+      // The wheel only picks present people, so an absent attendee can't be
+      // the selection — clear it if we just unchecked them.
+      if (selectedAttendeeId === id) setSelectedAttendeeId(null);
+    } else {
+      next.add(id);
+    }
     setPresentIds(next);
   };
 
@@ -376,6 +335,7 @@ function MeetingsTab() {
       await api.post('/meetings', {
         date,
         attendeeIds: Array.from(presentIds),
+        selectedAttendeeId,
         ...buildTopicBody(recordTopic),
       });
       refresh();
@@ -428,6 +388,23 @@ function MeetingsTab() {
               ))}
             </div>
           </div>
+          <div>
+            <label className="text-sm font-medium text-woodland-muted block mb-1">
+              Selected by wheel:
+            </label>
+            <select
+              value={selectedAttendeeId ?? ''}
+              onChange={(e) => setSelectedAttendeeId(e.target.value || null)}
+              className="input py-1.5 w-auto"
+            >
+              <option value="">— None —</option>
+              {visibleAttendees
+                .filter((a) => presentIds.has(a.attendeeId))
+                .map((a) => (
+                  <option key={a.attendeeId} value={a.attendeeId}>{a.name}</option>
+                ))}
+            </select>
+          </div>
           <button onClick={submit} disabled={busy} className="btn-primary">
             Save meeting
           </button>
@@ -443,19 +420,30 @@ function MeetingsTab() {
           <p className="px-5 py-4 text-woodland-muted text-sm">No meetings recorded yet.</p>
         )}
         <ul>
-          {meetings.map((m) => (
-            <li key={m.meetingId} className="px-5 py-2.5 border-t border-woodland-border text-sm">
-              <div className="flex items-baseline justify-between gap-3 flex-wrap">
-                <div>
-                  <span className="font-medium">{m.date}</span>{' '}
-                  <span className="text-woodland-muted">— {topicSummary(m)}</span>
+          {meetings.map((m) => {
+            const selectedName = m.selectedAttendeeId
+              ? attendees.find((a) => a.attendeeId === m.selectedAttendeeId)?.name
+              : null;
+            return (
+              <li key={m.meetingId} className="px-5 py-2.5 border-t border-woodland-border text-sm">
+                <div className="flex items-baseline justify-between gap-3 flex-wrap">
+                  <div>
+                    <span className="font-medium">{m.date}</span>{' '}
+                    <span className="text-woodland-muted">— {topicSummary(m)}</span>
+                  </div>
+                  <span className="text-xs text-woodland-muted">
+                    {m.attendeeIds.length} present
+                    {selectedName && (
+                      <>
+                        <span className="mx-1.5">•</span>
+                        <span className="text-woodland-accent">✦</span> {selectedName}
+                      </>
+                    )}
+                  </span>
                 </div>
-                <span className="text-xs text-woodland-muted">
-                  {m.attendeeIds.length} present
-                </span>
-              </div>
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ul>
       </div>
     </div>

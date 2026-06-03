@@ -59,20 +59,14 @@ export type Attendee = {
   createdAt: string;
 };
 
-export type Spin = {
-  spinId: string;
-  timestamp: string;
-  selectedAttendeeId: string;
-  eligibleAttendeeIds: string[];
-  triggeredBy: string;
-};
-
 export type MeetingTopicType = 'fourTs' | 'reading' | 'presentation';
 
 export type Meeting = {
   meetingId: string;
   date: string;
   attendeeIds: string[];
+  /** Attendee picked by the wheel for this meeting (admin-recorded). */
+  selectedAttendeeId?: string | null;
   topicType?: MeetingTopicType | null;
   book?: string | null;
   chapter?: number | null;
@@ -98,14 +92,11 @@ export type Stats = {
     timesSelected: number;
     isLastSelected: boolean;
   }>;
-  lastSpin: Spin | null;
-};
-
-export type PendingUser = {
-  userId: string;
-  email: string;
-  name: string;
-  createdAt: string;
+  lastPick: {
+    meetingId: string;
+    date: string;
+    selectedAttendeeId: string;
+  } | null;
 };
 
 export type AuthUser = {

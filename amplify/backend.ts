@@ -15,31 +15,20 @@ import {
   RestApi,
   type MethodOptions,
 } from 'aws-cdk-lib/aws-apigateway';
-import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
 import { Runtime } from 'aws-cdk-lib/aws-lambda';
 import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
 
 import { auth } from './auth/resource';
-import { preSignUpTrigger } from './functions/preSignUp/resource';
 
 const backend = defineBackend({
   auth,
-  preSignUpTrigger,
 });
 
-// Disable Cognito's self-confirm email flow. Default user pool config has
-// `email` in AutoVerifiedAttributes, which triggers a verification-code email
-// the user could enter to bypass admin approval. With this empty, signups
-// stay UNCONFIRMED with no code email sent until AdminConfirmSignUp.
-// AttributesRequireVerificationBeforeUpdate must be a subset of
-// AutoVerifiedAttributes, so clear both. Email-based password reset is
-// unavailable as a result; admin must reset passwords via
-// AdminSetUserPassword.
+// Signup is retired: the public app has no registration surface and admins are
+// created via the AWS console (AdminCreateUser). Lock the pool to admin-only
+// creation so the Cognito SignUp API can't be used to self-register either.
 const cfnUserPool = backend.auth.resources.cfnResources.cfnUserPool;
-cfnUserPool.autoVerifiedAttributes = [];
-cfnUserPool.userAttributeUpdateSettings = {
-  attributesRequireVerificationBeforeUpdate: [],
-};
+cfnUserPool.adminCreateUserConfig = { allowAdminCreateUserOnly: true };
 
 // All API resources live in this stack — tables, Lambdas, REST API. Keeping
 // them co-located prevents the cross-stack reference cycle that arises when
@@ -58,11 +47,6 @@ const meetingsTable = new Table(apiStack, 'MeetingsTable', {
   billingMode: BillingMode.PAY_PER_REQUEST,
 });
 
-const spinsTable = new Table(apiStack, 'SpinsTable', {
-  partitionKey: { name: 'spinId', type: AttributeType.STRING },
-  billingMode: BillingMode.PAY_PER_REQUEST,
-});
-
 // ---------- API Lambdas ----------
 // Raw NodejsFunction (not defineFunction) — keeps the Lambdas in apiStack
 // alongside the tables they read/write, so grants and env vars stay
@@ -75,7 +59,6 @@ const handlersRoot = resolve(__dirname, '../backend-aws/functions');
 const tableEnv = {
   ATTENDEES_TABLE: attendeesTable.tableName,
   MEETINGS_TABLE: meetingsTable.tableName,
-  SPINS_TABLE: spinsTable.tableName,
 };
 
 function apiHandler(id: string, dir: string, extraEnv: Record<string, string> = {}) {
@@ -88,50 +71,18 @@ function apiHandler(id: string, dir: string, extraEnv: Record<string, string> = 
 
 const attendeesFn = apiHandler('attendeesFn', 'attendees');
 const meetingsFn = apiHandler('meetingsFn', 'meetings');
-const spinsFn = apiHandler('spinsFn', 'spins');
 const statsFn = apiHandler('statsFn', 'stats');
 const verseFn = apiHandler('verseFn', 'verse');
-const adminUsersFn = apiHandler('adminUsersFn', 'adminUsers', {
-  USER_POOL_ID: backend.auth.resources.userPool.userPoolId,
-});
 
 // ---------- DDB grants (least-privilege) ----------
 
 attendeesTable.grantReadWriteData(attendeesFn);
 attendeesTable.grantReadData(meetingsFn); // validates attendeeIds on POST
-attendeesTable.grantReadData(spinsFn); // validates attendeeIds on POST
 attendeesTable.grantReadData(statsFn);
 
 meetingsTable.grantReadWriteData(meetingsFn);
 meetingsTable.grantReadData(statsFn);
 meetingsTable.grantReadData(verseFn);
-
-spinsTable.grantReadWriteData(spinsFn);
-spinsTable.grantReadData(statsFn);
-
-// adminUsers calls Cognito IDP scoped to this user pool.
-adminUsersFn.role!.addToPrincipalPolicy(
-  new PolicyStatement({
-    actions: [
-      'cognito-idp:ListUsers',
-      'cognito-idp:AdminConfirmSignUp',
-      'cognito-idp:AdminAddUserToGroup',
-      'cognito-idp:AdminDeleteUser',
-    ],
-    resources: [backend.auth.resources.userPool.userPoolArn],
-  })
-);
-
-// preSignUp may optionally SES-notify the admin if ADMIN_NOTIFY_EMAIL is set
-// on the Lambda. Grant SES so it's ready when env vars are added later.
-// The trigger Lambda lives in its own stack (function); attaching the
-// policy from apiStack creates apiStack→function (one-way, no cycle).
-backend.preSignUpTrigger.resources.lambda.role!.addToPrincipalPolicy(
-  new PolicyStatement({
-    actions: ['ses:SendEmail', 'ses:SendRawEmail'],
-    resources: ['*'],
-  })
-);
 
 // ---------- REST API ----------
 
@@ -161,15 +112,15 @@ const publicOpts: MethodOptions = {
 const integ = {
   attendees: new LambdaIntegration(attendeesFn),
   meetings: new LambdaIntegration(meetingsFn),
-  spins: new LambdaIntegration(spinsFn),
   stats: new LambdaIntegration(statsFn),
   verse: new LambdaIntegration(verseFn),
-  adminUsers: new LambdaIntegration(adminUsersFn),
 };
 
 // /attendees, /attendees/{id}
+// GET is public so the unauthenticated wheel page can render the roster.
+// Writes (POST/PUT) still require an admin-group Cognito token.
 const attendeesRoot = api.root.addResource('attendees');
-attendeesRoot.addMethod('GET', integ.attendees, authed);
+attendeesRoot.addMethod('GET', integ.attendees, publicOpts);
 attendeesRoot.addMethod('POST', integ.attendees, authed);
 attendeesRoot.addResource('{id}').addMethod('PUT', integ.attendees, authed);
 
@@ -179,23 +130,11 @@ meetingsRoot.addMethod('GET', integ.meetings, authed);
 meetingsRoot.addMethod('POST', integ.meetings, authed);
 meetingsRoot.addResource('{id}').addMethod('DELETE', integ.meetings, authed);
 
-// /spins, /spins/latest
-const spinsRoot = api.root.addResource('spins');
-spinsRoot.addMethod('POST', integ.spins, authed);
-spinsRoot.addResource('latest').addMethod('GET', integ.spins, authed);
+// /stats — public alongside the wheel; no member-only data.
+api.root.addResource('stats').addMethod('GET', integ.stats, publicOpts);
 
-// /stats
-api.root.addResource('stats').addMethod('GET', integ.stats, authed);
-
-// /verse — public (banner renders on /login)
+// /verse — public (banner renders on the wheel/stats pages)
 api.root.addResource('verse').addMethod('GET', integ.verse, publicOpts);
-
-// /users/pending, /users/{id}/approve, /users/{id}/reject
-const usersRoot = api.root.addResource('users');
-usersRoot.addResource('pending').addMethod('GET', integ.adminUsers, authed);
-const usersId = usersRoot.addResource('{id}');
-usersId.addResource('approve').addMethod('POST', integ.adminUsers, authed);
-usersId.addResource('reject').addMethod('POST', integ.adminUsers, authed);
 
 // ---------- Outputs ----------
 

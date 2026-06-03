@@ -1,38 +1,9 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
-import { v4 as uuid } from 'uuid';
-import { load, save } from '../db.js';
+import { load } from '../db.js';
 import { signToken, requireAuth, AuthedRequest } from '../auth.js';
 
 const router = Router();
-
-router.post('/signup', (req, res) => {
-  const { email, password, name } = req.body ?? {};
-  if (!email || !password || !name) {
-    return res.status(400).json({ error: 'email, password, name required' });
-  }
-  if (password.length < 8) {
-    return res.status(400).json({ error: 'Password must be at least 8 characters' });
-  }
-  const db = load();
-  const normalizedEmail = String(email).toLowerCase();
-  if (db.users.some((u) => u.email === normalizedEmail)) {
-    return res.status(409).json({ error: 'Email already registered' });
-  }
-  const user = {
-    userId: uuid(),
-    email: normalizedEmail,
-    name: String(name),
-    passwordHash: bcrypt.hashSync(password, 10),
-    role: 'member' as const,
-    status: 'pending' as const,
-    createdAt: new Date().toISOString(),
-  };
-  db.users.push(user);
-  save();
-  console.log(`[signup] New signup awaiting approval: ${user.name} <${user.email}>`);
-  res.status(201).json({ ok: true });
-});
 
 router.post('/login', (req, res) => {
   const { email, password } = req.body ?? {};

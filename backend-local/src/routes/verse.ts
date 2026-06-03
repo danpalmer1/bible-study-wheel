@@ -7,11 +7,14 @@ type ChapterCache = { data: any; expires: number };
 const chapterCache = new Map<string, ChapterCache>();
 const CHAPTER_TTL_MS = 24 * 60 * 60 * 1000;
 
-function currentThursday(now = new Date()): Date {
+// Returns the next upcoming Thursday (today if today is Thursday, otherwise
+// the next one). Mirrors backend-aws/functions/verse so the verse banner
+// behaves the same in local dev.
+function nextThursday(now = new Date()): Date {
   const today = new Date(now);
   today.setHours(0, 0, 0, 0);
-  const daysSinceThursday = (today.getDay() + 7 - 4) % 7;
-  today.setDate(today.getDate() - daysSinceThursday);
+  const daysUntilThursday = (4 - today.getDay() + 7) % 7;
+  today.setDate(today.getDate() + daysUntilThursday);
   return today;
 }
 
@@ -48,7 +51,7 @@ function findUpcomingReading(meetings: Meeting[], from: Date): Meeting | null {
 router.get('/', async (_req, res) => {
   try {
     const db = load();
-    const thursday = currentThursday();
+    const thursday = nextThursday();
     const meeting = findUpcomingReading(db.meetings, thursday);
     if (!meeting || !meeting.book || !meeting.chapter) return res.json(null);
 

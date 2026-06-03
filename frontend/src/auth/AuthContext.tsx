@@ -7,7 +7,6 @@ type AuthState = {
   user: AuthUser | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  signup: (email: string, password: string, name: string) => Promise<void>;
   logout: () => Promise<void>;
 };
 
@@ -30,14 +29,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(u);
   };
 
-  const signup = async (email: string, password: string, name: string) => {
-    if (USE_AMPLIFY) {
-      await amplifySignup(email, password, name);
-    } else {
-      await api.post('/auth/signup', { email, password, name });
-    }
-  };
-
   const logout = async () => {
     if (USE_AMPLIFY) {
       await amplifyLogout();
@@ -48,7 +39,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, signup, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, logout }}>
       {children}
     </AuthContext.Provider>
   );
@@ -93,10 +84,16 @@ async function loadAmplifyUser(): Promise<AuthUser | null> {
     const session = await fetchAuthSession();
     const groupsClaim = session.tokens?.idToken?.payload['cognito:groups'];
     const groups = Array.isArray(groupsClaim) ? (groupsClaim as string[]) : [];
+    // Prefer given_name + family_name (new signups); fall back to name for
+    // legacy users created before the split.
+    const composed = [attrs.given_name, attrs.family_name]
+      .filter((v): v is string => !!v && v.trim().length > 0)
+      .join(' ')
+      .trim();
     return {
       userId: current.userId,
       email: attrs.email ?? '',
-      name: attrs.name ?? '',
+      name: composed || attrs.name || '',
       role: groups.includes('admin') ? 'admin' : 'member',
     };
   } catch {
@@ -121,17 +118,6 @@ async function amplifyLogin(email: string, password: string): Promise<AuthUser> 
   const u = await loadAmplifyUser();
   if (!u) throw new Error('Signed in, but session could not be loaded');
   return u;
-}
-
-async function amplifySignup(email: string, password: string, name: string): Promise<void> {
-  const { signUp } = await import('aws-amplify/auth');
-  await signUp({
-    username: email,
-    password,
-    options: {
-      userAttributes: { email, name },
-    },
-  });
 }
 
 async function amplifyLogout(): Promise<void> {

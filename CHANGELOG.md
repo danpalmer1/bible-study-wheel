@@ -9,6 +9,86 @@ Versioning is loose pre-1.0 — minor versions may include breaking changes.
 
 _Add new entries here as work lands; promote to a versioned section when shipping._
 
+### Removed — Retire the signup / member system
+- Self-registration is gone end-to-end. With the wheel and stats both public, a member account granted nothing, so the entire signup/approval/linking surface is deleted.
+- Frontend: removed `Signup.tsx` + the `/signup` route, the public Login/Sign up nav buttons, `AuthContext.signup`/`amplifySignup`, the Admin → Pending users tab, and the attendee→user link + promote-to-admin UI. The login route is now the unlisted `/admin-login` (no nav entry; `ProtectedRoute` and logout redirect there). `PendingUser`, `ApprovedUser`, and `Attendee.userId` dropped from `api/client.ts`.
+- `backend-local`: removed `POST /auth/signup`, the entire `routes/users.ts` (pending/approve/reject/promote/list) + its mount, the `userId` link handling in `PUT /attendees/{id}`, and `Attendee.userId` from `db.ts`. Login + the seeded admin are untouched.
+- `backend-aws` / amplify: deleted `functions/adminUsers` and the `preSignUp` notification trigger (handler + `defineFunction` + auth wiring + SES IAM grant), the `/users*` API routes, and the `userId` write in the attendees handler. `amplify/backend.ts` sets `AllowAdminCreateUserOnly` on the user pool so the Cognito SignUp API can't self-register either. New admins are created via `admin-create-user`.
+
+### Fixed — Wheel no longer corrupts when inputs change mid-spin
+- `frontend/src/spin/SpinLockContext.tsx` (new) — a `spinning` flag hoisted above the router. `WheelPage` drives it; `Nav` disables all links + Logout while a spin runs, and `AttendeeSelector` gains a `disabled` prop so participants can't be toggled mid-spin. Both were the triggers that reshuffled or unmounted the wheel during its animation. A page-unmount cleanup clears the flag so the nav can never get stuck locked.
+
+### Changed — Wheel drops the winner after each spin
+- `frontend/src/pages/WheelPage.tsx` — when a spin lands, the winner is removed from the eligible pool for the session (unchecked + disabled via `disabledIds`) so a re-spin can't pick the same person until reload. Restores the pre-v0.5.0 auto-exclude behavior, client-side only (wheel stays stateless).
+
+### Fixed — Meeting "Selected by wheel" can't be an absent attendee
+- `frontend/src/pages/AdminPage.tsx` (`MeetingsTab`) — the "Selected by wheel" dropdown now lists only attendees checked present, and un-checking the selected person clears the selection. Prevents recording a wheel pick for someone not marked as attending (which would feed a contradictory record into stats).
+
+### Added — v0.5.1 Stats page is now public
+- `frontend/src/App.tsx` — drop the `ProtectedRoute` wrapper on `/stats` so anonymous visitors land on the table.
+- `frontend/src/components/Nav.tsx` — `Stats` link now renders in both logged-in and logged-out nav states (matches the public wheel).
+- `backend-local/src/routes/stats.ts` — `GET /stats` drops the `requireAuth` middleware.
+- `amplify/backend.ts` — `GET /stats` flipped from `authed` → `publicOpts`.
+
+### Documentation — v0.5.1
+- `README.md` Known bugs — added the verse banner "showing previous week's reading" symptom with investigation notes, pending data-state verification.
+- `README.md` Future changes — open question added about removing the user/signup system entirely (wheel + stats are public, members get no exclusive surface). Admins via secret URL.
+
+### Fixed — v0.5.0 Stats reads from meetings (replaces spins)
+- `backend-local/src/routes/stats.ts` + `backend-aws/functions/stats/index.js` — Stats no longer scans the `Spins` table. `timesSelected` now counts `meetings WHERE selectedAttendeeId === attendeeId`; `lastPick` is the most recent meeting with a `selectedAttendeeId` (returns `{ meetingId, date, selectedAttendeeId }`). With the wheel stateless as of v0.5.0, the old `lastSpin` shape and spins-derived counts froze on the day the feature shipped — this restores live numbers.
+- `timesEligible` collapses to `meetingsAttended` (every present attendee is on the wheel). Pick rate is now Picked ÷ Meetings attended. The `On wheel` column stays for visual parity but is now informational.
+- `frontend/src/api/client.ts` — `Stats.lastSpin: Spin | null` replaced with `Stats.lastPick: { meetingId, date, selectedAttendeeId } | null`. `Spin` type removed; nothing imported it after the v0.5.0 wheel rewrite.
+- `frontend/src/pages/StatsPage.tsx` — header now shows `Last pick: <date>` (meeting date, not spin timestamp). Footer note rewritten to explain the post-stateless-wheel semantics.
+
+### Removed — v0.5.0 /spins route + Spins DDB table
+- `backend-local/src/routes/spins.ts` + its mount in `backend-local/src/server.ts` deleted. `backend-aws/functions/spins/index.js` deleted. `amplify/backend.ts` — `Spins` DDB table, its IAM grants, and the `spinsFn` Lambda removed. `Spin` type and `spins` field dropped from `backend-local/src/db.ts`. Historical `spins` data in existing `db.json` files is left untouched as a manual archive; nothing reads it.
+
+### Added — v0.5.0 public, stateless wheel
+- `frontend/src/App.tsx` — drop the `ProtectedRoute` wrapper on `/wheel` so anonymous visitors can land directly on the spinner.
+- `frontend/src/components/Nav.tsx` — show the "Wheel" link in both logged-in and logged-out nav states.
+- `frontend/src/pages/WheelPage.tsx` — wheel becomes a pure visual roll. Removed: the `GET /spins/latest` fetch, the `POST /spins` call, the `lastSpin` / `submitting` state, the auto-exclude-last-picked behavior, and the "Recording…" button label. Button now toggles between `Spin` and `Spinning…`. The authoritative "who got picked" record moves to `Meeting.selectedAttendeeId` (separate entry below).
+- `amplify/backend.ts` — `GET /attendees` flipped from `authed` → `publicOpts` so the unauthenticated wheel can read the roster. Writes (`POST`, `PUT`) still require an admin-group Cognito token.
+- `backend-local/src/routes/attendees.ts` — local mirror: `GET /attendees` drops the `requireAuth` middleware.
+
+### Added — v0.5.0 meeting selected-attendee record
+- `frontend/src/api/client.ts` + `backend-local/src/db.ts` — `Meeting` gains an optional `selectedAttendeeId: string | null` field. Authoritative record of who the wheel picked for a given meeting.
+- `backend-aws/functions/meetings/index.js` + `backend-local/src/routes/meetings.ts` — `POST /meetings` accepts `selectedAttendeeId`, validates it against the known-attendee set (reusing the existing Scan in the AWS handler to avoid a second round-trip), and persists `null` to clear. Mirrored across AWS Lambda and local route.
+- `frontend/src/pages/AdminPage.tsx` (`MeetingsTab`) — new "Selected by wheel" dropdown below the attendance checkboxes, sourced from the same `visibleAttendees` list. Recent-meetings list shows a `✦ Name` inline badge for meetings that have a recorded selection.
+- **Known gap:** Stats still reads the legacy `Spins` table for `timesSelected` and `lastSpin`. Migration to read from `Meeting.selectedAttendeeId` is tracked as a follow-up branch (`feature/stats-from-meetings`) and documented under README → Known bugs. Must ship before `release/v0.5.0` merges to master.
+
+### Added — v0.5.0 admin: link attendees to users + promote
+- New endpoints, mirrored across `backend-aws/functions/adminUsers/index.js` and `backend-local/src/routes/users.ts`:
+  - `GET /users` — list approved (CONFIRMED / `active`) users with `role` derived from admin-group membership. Admin-only. AWS implementation issues `ListUsersCommand` + `ListUsersInGroupCommand` in parallel and joins them in-memory.
+  - `POST /users/{id}/promote` — adds the user to the `admin` Cognito group (AWS: `AdminAddUserToGroupCommand`) or flips `User.role` (local). Admin-only.
+- `PUT /attendees/{id}` now accepts an optional `userId` (string to link, `null` to unlink). Local route validates the userId exists in the user list; AWS Lambda trusts the caller (admin-only, no DDB FK to enforce).
+- `frontend/src/api/client.ts` — new `ApprovedUser` type; `Attendee` gains optional `userId`.
+- `frontend/src/pages/AdminPage.tsx` (`AttendeesTab`) — each attendee row now shows the linked user (name + email + admin badge) below the name, a select to link/unlink inline, and a "Promote" action that appears only when the linked user isn't already admin. The link-user picker filters out users already linked to another attendee to prevent duplicates.
+- `backend-aws/functions/adminUsers/index.js` — new `displayName(u)` helper prefers `given_name + family_name` (v0.5.0 split signup) and falls back to `name` for legacy users. Used by both the `/users/pending` list and the new `/users` list.
+- `amplify/backend.ts` — register `GET /users` and `POST /users/{id}/promote`; add `cognito-idp:ListUsersInGroup` to the `adminUsers` Lambda's IAM policy.
+
+### Added — v0.5.0 signup UX polish
+- `frontend/public/favicon.svg` — 8-segment colored wheel SVG matching the in-app `Wheel.tsx` palette; linked from `frontend/index.html`. Default tab icon replaced.
+- Show/hide password eye toggle on `Login.tsx` and `Signup.tsx`. Inline SVG icons (Feather-style), no new dependency. `type="button"` so the toggle doesn't submit the form.
+- `frontend/src/pages/AdminPage.tsx` — wrapped the "New attendee" input + Add button in a `<form>` so pressing Enter submits. Other admin inputs (date picker, attendance checkboxes, topic editor) deliberately untouched: ambiguous primary action.
+
+### Added — v0.5.0 split signup name into first/last across stack
+- `amplify/auth/resource.ts` — added `givenName` and `familyName` as optional, mutable standard Cognito attributes alongside the existing required `fullname`. Kept `fullname` required because Cognito disallows downgrading a required attr on an existing pool.
+- `frontend/src/auth/AuthContext.tsx` — `signup()` signature now `(email, password, firstName, lastName)`. `amplifySignup` sends `given_name` + `family_name` + `name=<first> <last>` to Cognito; `loadAmplifyUser` prefers `given_name + family_name` with fallback to `name` for legacy users.
+- `frontend/src/pages/Signup.tsx` — single Name field replaced with side-by-side First Name / Last Name inputs.
+- `backend-local/src/routes/auth.ts` — `/auth/signup` now requires `{ firstName, lastName }`; server concatenates and persists a single `name`. Removes the prior single-name body shape.
+
+### Fixed — v0.5.0 verse banner rolled over a week late
+- `backend-aws/functions/verse/index.js` and `backend-local/src/routes/verse.ts` — replaced `currentThursday()` (most-recent past Thursday) with `nextThursday()` (today if today is Thursday, otherwise the next upcoming one). On Fri 5/22 the banner now shows 5/28's reading instead of clinging to 5/21's. Both AWS and local mirrors updated so behavior matches across environments.
+
+### Documentation — v0.5.0
+- `README.md` Known bugs — expanded the admin sign-up notification SES failure entry with four likely root causes (Lambda env vars unset, SES sandbox-mode requiring verified recipient, region mismatch, swallowed errors) and a concrete fix checklist.
+- `README.md` Future changes — dropped the trial-spin / official-spin gating debate. New direction: the wheel is fully public and stateless; the authoritative "who got picked" record lives on the admin meeting-log entry form as a dropdown. Pending cleanup of `/spins` POST and the Spins table flagged.
+- `README.md` Future changes — added a hybrid GitHub Actions CI plan: PR validation via typecheck + frontend build; Amplify Hosting keeps the actual master→prod deploy.
+- `README.md` Deploy section — replaced Gen 1 CLI walkthrough with the Gen 2 flow (`aws configure` → `npx ampx sandbox` → `npm run sync-config` → Amplify Hosting connect). Defers detail to `backend-aws/AWS_SETUP.md`.
+
+### Chore — v0.5.0
+- `.gitignore` — ignore `*.tsbuildinfo` (generated by `tsc -b` incremental builds, was getting picked up by `git status` as untracked).
+
 ### Fixed — Amplify Gen 2 sandbox deploys end-to-end
 - `amplify/backend.ts` — replaced the 6 API Lambdas' `defineFunction()` definitions with raw CDK `NodejsFunction` in the custom `BibleStudyApiStack`. The previous setup created a cross-stack cycle (`auth → function → BibleStudyApiStack → auth`) via Lambda env vars referencing tables in one stack and the user pool in another. Co-locating tables, Lambdas, and grants in a single stack breaks the cycle. Bonus: `NodejsFunction` externalizes `@aws-sdk/*` by default (Lambda Node 20 runtime provides them), so Lambdas are smaller.
 - Root `package.json` — added `@aws-sdk/client-dynamodb`, `@aws-sdk/lib-dynamodb`, `@aws-sdk/client-ses`, `@aws-sdk/client-cognito-identity-provider` as runtime deps and `@types/node` as dev. `defineFunction()` (still used for the preSignUp trigger) doesn't externalize the SDK by default, so esbuild needs to resolve them; the explicit deps give it a path. Future API-Lambda changes don't need them since `NodejsFunction` externalizes by default.

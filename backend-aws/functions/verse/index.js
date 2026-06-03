@@ -6,11 +6,15 @@ const MEETINGS_TABLE = process.env.MEETINGS_TABLE;
 const chapterCache = new Map();
 const CHAPTER_TTL_MS = 24 * 60 * 60 * 1000;
 
-function currentThursday(now = new Date()) {
+// Returns the next upcoming Thursday (today if today is Thursday, otherwise
+// the next one). This makes the verse banner roll over to next week's
+// reading the day AFTER the meeting, rather than continuing to show the
+// just-past meeting's verse for six more days.
+function nextThursday(now = new Date()) {
   const today = new Date(now);
   today.setUTCHours(0, 0, 0, 0);
-  const daysSinceThursday = (today.getUTCDay() + 7 - 4) % 7;
-  today.setUTCDate(today.getUTCDate() - daysSinceThursday);
+  const daysUntilThursday = (4 - today.getUTCDay() + 7) % 7;
+  today.setUTCDate(today.getUTCDate() + daysUntilThursday);
   return today;
 }
 
@@ -48,7 +52,7 @@ exports.handler = async () => {
   try {
     const out = await doc.send(new ScanCommand({ TableName: MEETINGS_TABLE }));
     const meetings = out.Items ?? [];
-    const thursday = currentThursday();
+    const thursday = nextThursday();
     const meeting = findUpcomingReading(meetings, thursday);
     if (!meeting) return ok(null);
     const chapter = await fetchChapter(meeting.book, meeting.chapter);

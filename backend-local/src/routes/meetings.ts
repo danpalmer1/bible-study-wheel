@@ -14,7 +14,8 @@ router.get('/', requireAuth, requireAdmin, (_req, res) => {
 });
 
 router.post('/', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
-  const { date, attendeeIds, topicType, book, chapter, topicText } = req.body ?? {};
+  const { date, attendeeIds, selectedAttendeeId, topicType, book, chapter, topicText } =
+    req.body ?? {};
   if (!date) return res.status(400).json({ error: 'date required' });
 
   const db = load();
@@ -24,6 +25,13 @@ router.post('/', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
     if (!Array.isArray(attendeeIds) || !attendeeIds.every((id: string) => all.has(id))) {
       return res.status(400).json({ error: 'Unknown attendee id' });
     }
+  }
+  if (
+    selectedAttendeeId !== undefined &&
+    selectedAttendeeId !== null &&
+    !all.has(selectedAttendeeId)
+  ) {
+    return res.status(400).json({ error: 'Unknown selectedAttendeeId' });
   }
   if (topicType !== undefined && topicType !== null && !VALID_TYPES.includes(topicType)) {
     return res.status(400).json({ error: 'Invalid topicType' });
@@ -43,6 +51,9 @@ router.post('/', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
 
   if (attendeeIds !== undefined) {
     meeting.attendeeIds = attendeeIds;
+  }
+  if (selectedAttendeeId !== undefined) {
+    meeting.selectedAttendeeId = selectedAttendeeId || null;
   }
 
   if (topicType !== undefined) {
