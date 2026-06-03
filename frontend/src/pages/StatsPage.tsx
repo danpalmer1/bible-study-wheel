@@ -34,7 +34,7 @@ export default function StatsPage() {
             <th className="text-right px-4 py-2.5 font-medium">Meetings</th>
             <th
               className="text-right px-4 py-2.5 font-medium"
-              title="Meetings attended — every present attendee is on the wheel"
+              title="Meetings this person was on the wheel — attended, minus the meeting right after they were picked"
             >
               On wheel
             </th>
@@ -79,9 +79,10 @@ export default function StatsPage() {
         </tbody>
       </table>
       <p className="px-5 py-3 text-xs text-woodland-muted border-t border-woodland-border bg-woodland-bg">
-        <strong>On wheel</strong> = meetings this person attended (every attendee is on the wheel
-        when present). <strong>Pick rate</strong> = picked ÷ on wheel. The wheel itself is now
-        purely visual — the authoritative pick is whoever the admin recorded for that meeting.
+        <strong>On wheel</strong> = meetings this person was eligible for — i.e. attended, not
+        counting the meeting right after they were picked (whoever prays sits out the next
+        wheel). <strong>Pick rate</strong> = picked ÷ on wheel. The authoritative pick is
+        whoever the admin recorded for that meeting.
       </p>
     </div>
   );

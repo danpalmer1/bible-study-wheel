@@ -222,10 +222,14 @@ function TopicEditor({
   );
 }
 
-function currentThursday(now = new Date()): Date {
+// Next upcoming Thursday (today if today is Thursday, otherwise the next one).
+// Matches the verse route's nextThursday so the planner and the verse banner
+// stay in phase — and so a meeting that already happened drops out of the
+// "upcoming" outlook the day after, instead of lingering until next Thursday.
+function nextThursday(now = new Date()): Date {
   const d = new Date(now);
   d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() - ((d.getDay() + 7 - 4) % 7));
+  d.setDate(d.getDate() + ((4 - d.getDay() + 7) % 7));
   return d;
 }
 
@@ -460,7 +464,7 @@ function UpcomingMeetings({
   busy: boolean;
 }) {
   const thursdays = useMemo(() => {
-    const start = currentThursday();
+    const start = nextThursday();
     return Array.from({ length: 4 }, (_, i) => {
       const d = new Date(start);
       d.setDate(d.getDate() + i * 7);
