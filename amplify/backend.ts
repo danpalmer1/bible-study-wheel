@@ -29,10 +29,6 @@ const backend = defineBackend({
 // creation so the Cognito SignUp API can't be used to self-register either.
 const cfnUserPool = backend.auth.resources.cfnResources.cfnUserPool;
 cfnUserPool.adminCreateUserConfig = { allowAdminCreateUserOnly: true };
-cfnUserPool.autoVerifiedAttributes = [];
-cfnUserPool.userAttributeUpdateSettings = {
-  attributesRequireVerificationBeforeUpdate: [],
-};
 
 // All API resources live in this stack — tables, Lambdas, REST API. Keeping
 // them co-located prevents the cross-stack reference cycle that arises when
