@@ -16,6 +16,12 @@ _Add new entries here as work lands; promote to a versioned section when shippin
 ### Fixed — Upcoming-meetings outlook rolls forward the day after a meeting
 - `frontend/src/pages/AdminPage.tsx` — the `Upcoming meetings` planner anchored its 4-week window on `currentThursday()` (rounds **down** to the current week's Thursday), so a meeting that already happened lingered in the outlook until the next Thursday. Switched to `nextThursday()` (rounds up; matches the verse route), so e.g. on Wed Jun 3 the window is Jun 4 / 11 / 18 / 25 instead of May 28 / Jun 4 / 11 / 18. Also realigns the planner with the verse banner's week, the likely cause of the "banner shows previous week's reading" report.
 
+### Fixed — Production hardening (full-codebase review)
+- **Delete a meeting from the admin UI.** `AdminPage` "Recent meetings" rows gain a Delete button (wired to the existing `DELETE /meetings/:id`), so a mistyped date or duplicate can be removed instead of polluting stats and the cooldown forever.
+- **A wheel pick must be a present attendee — enforced server-side.** `backend-aws/functions/meetings/index.js` and `backend-local/src/routes/meetings.ts` now reject `selectedAttendeeId` not in `attendeeIds` (the frontend already constrained it; this closes the API gap).
+- **Verse banner rolls over at the group's midnight, not UTC.** The verse Lambda + local route compute the week's Thursday in `GROUP_TZ` (default `America/Chicago`) via `Intl.DateTimeFormat`, instead of the server's UTC clock — so the reading no longer changes up to a day early/late for a US-based group. Set the `GROUP_TZ` env var to relocate.
+- Cleanup: removed the dead `UserNotConfirmedException` → "awaiting admin approval" mapping in `AuthContext` (signup is retired; users are always confirmed); the nav brand logo now respects the mid-spin lock like the other nav links.
+
 ### Removed — Retire the signup / member system
 - Self-registration is gone end-to-end. With the wheel and stats both public, a member account granted nothing, so the entire signup/approval/linking surface is deleted.
 - Frontend: removed `Signup.tsx` + the `/signup` route, the public Login/Sign up nav buttons, `AuthContext.signup`/`amplifySignup`, the Admin → Pending users tab, and the attendee→user link + promote-to-admin UI. The login route is now the unlisted `/admin-login` (no nav entry; `ProtectedRoute` and logout redirect there). `PendingUser`, `ApprovedUser`, and `Attendee.userId` dropped from `api/client.ts`.

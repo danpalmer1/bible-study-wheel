@@ -19,7 +19,10 @@ export default function Nav() {
       <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
         <Link
           to="/wheel"
-          className="font-serif text-lg font-semibold text-woodland-primary tracking-tight"
+          tabIndex={spinning ? -1 : undefined}
+          className={`font-serif text-lg font-semibold text-woodland-primary tracking-tight ${
+            spinning ? 'pointer-events-none opacity-40' : ''
+          }`}
         >
           Bible Study Wheel
         </Link>

@@ -75,6 +75,11 @@ router.post('/', requireAuth, requireAdmin, (req: AuthedRequest, res) => {
     }
   }
 
+  // The wheel only picks present people — a pick must be in attendeeIds.
+  if (meeting.selectedAttendeeId && !meeting.attendeeIds.includes(meeting.selectedAttendeeId)) {
+    return res.status(400).json({ error: 'selectedAttendeeId must be one of the present attendees' });
+  }
+
   save();
   res.status(201).json(meeting);
 });

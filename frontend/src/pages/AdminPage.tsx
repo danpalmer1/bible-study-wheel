@@ -326,6 +326,20 @@ function MeetingsTab() {
     }
   };
 
+  const deleteMeeting = async (m: Meeting) => {
+    if (!window.confirm(`Delete the ${m.date} meeting? This can't be undone.`)) return;
+    setError(null);
+    setBusy(true);
+    try {
+      await api.del(`/meetings/${m.meetingId}`);
+      refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Delete failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const submit = async () => {
     if (!date) return;
     const msg = validateDraft(recordTopic);
@@ -435,15 +449,24 @@ function MeetingsTab() {
                     <span className="font-medium">{m.date}</span>{' '}
                     <span className="text-woodland-muted">— {topicSummary(m)}</span>
                   </div>
-                  <span className="text-xs text-woodland-muted">
-                    {m.attendeeIds.length} present
-                    {selectedName && (
-                      <>
-                        <span className="mx-1.5">•</span>
-                        <span className="text-woodland-accent">✦</span> {selectedName}
-                      </>
-                    )}
-                  </span>
+                  <div className="flex items-baseline gap-3">
+                    <span className="text-xs text-woodland-muted">
+                      {m.attendeeIds.length} present
+                      {selectedName && (
+                        <>
+                          <span className="mx-1.5">•</span>
+                          <span className="text-woodland-accent">✦</span> {selectedName}
+                        </>
+                      )}
+                    </span>
+                    <button
+                      onClick={() => deleteMeeting(m)}
+                      disabled={busy}
+                      className="text-xs text-woodland-danger hover:underline disabled:opacity-40"
+                    >
+                      Delete
+                    </button>
+                  </div>
                 </div>
               </li>
             );
