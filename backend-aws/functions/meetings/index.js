@@ -86,6 +86,13 @@ exports.handler = async (event) => {
           meeting.topicText = typeof topicText === 'string' ? topicText : '';
         }
       }
+      // The wheel only picks present people — a pick must be in attendeeIds.
+      if (
+        meeting.selectedAttendeeId &&
+        !(meeting.attendeeIds || []).includes(meeting.selectedAttendeeId)
+      ) {
+        return err('selectedAttendeeId must be one of the present attendees');
+      }
       await doc.send(new PutCommand({ TableName: TABLE, Item: meeting }));
       return ok(meeting, 201);
     }

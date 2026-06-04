@@ -222,10 +222,14 @@ function TopicEditor({
   );
 }
 
-function currentThursday(now = new Date()): Date {
+// Next upcoming Thursday (today if today is Thursday, otherwise the next one).
+// Matches the verse route's nextThursday so the planner and the verse banner
+// stay in phase — and so a meeting that already happened drops out of the
+// "upcoming" outlook the day after, instead of lingering until next Thursday.
+function nextThursday(now = new Date()): Date {
   const d = new Date(now);
   d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() - ((d.getDay() + 7 - 4) % 7));
+  d.setDate(d.getDate() + ((4 - d.getDay() + 7) % 7));
   return d;
 }
 
@@ -317,6 +321,20 @@ function MeetingsTab() {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Save failed');
       return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const deleteMeeting = async (m: Meeting) => {
+    if (!window.confirm(`Delete the ${m.date} meeting? This can't be undone.`)) return;
+    setError(null);
+    setBusy(true);
+    try {
+      await api.del(`/meetings/${m.meetingId}`);
+      refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Delete failed');
     } finally {
       setBusy(false);
     }
@@ -431,15 +449,24 @@ function MeetingsTab() {
                     <span className="font-medium">{m.date}</span>{' '}
                     <span className="text-woodland-muted">— {topicSummary(m)}</span>
                   </div>
-                  <span className="text-xs text-woodland-muted">
-                    {m.attendeeIds.length} present
-                    {selectedName && (
-                      <>
-                        <span className="mx-1.5">•</span>
-                        <span className="text-woodland-accent">✦</span> {selectedName}
-                      </>
-                    )}
-                  </span>
+                  <div className="flex items-baseline gap-3">
+                    <span className="text-xs text-woodland-muted">
+                      {m.attendeeIds.length} present
+                      {selectedName && (
+                        <>
+                          <span className="mx-1.5">•</span>
+                          <span className="text-woodland-accent">✦</span> {selectedName}
+                        </>
+                      )}
+                    </span>
+                    <button
+                      onClick={() => deleteMeeting(m)}
+                      disabled={busy}
+                      className="text-xs text-woodland-danger hover:underline disabled:opacity-40"
+                    >
+                      Delete
+                    </button>
+                  </div>
                 </div>
               </li>
             );
@@ -460,7 +487,7 @@ function UpcomingMeetings({
   busy: boolean;
 }) {
   const thursdays = useMemo(() => {
-    const start = currentThursday();
+    const start = nextThursday();
     return Array.from({ length: 4 }, (_, i) => {
       const d = new Date(start);
       d.setDate(d.getDate() + i * 7);

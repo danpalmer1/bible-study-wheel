@@ -7,15 +7,19 @@ type ChapterCache = { data: any; expires: number };
 const chapterCache = new Map<string, ChapterCache>();
 const CHAPTER_TTL_MS = 24 * 60 * 60 * 1000;
 
-// Returns the next upcoming Thursday (today if today is Thursday, otherwise
-// the next one). Mirrors backend-aws/functions/verse so the verse banner
-// behaves the same in local dev.
+// Returns the next upcoming Thursday (today if today is Thursday, otherwise the
+// next one) anchored to the GROUP's timezone. Mirrors backend-aws/functions/verse
+// so the verse banner behaves the same in local dev. Override with GROUP_TZ.
+const GROUP_TZ = process.env.GROUP_TZ || 'America/Chicago';
+
 function nextThursday(now = new Date()): Date {
-  const today = new Date(now);
-  today.setHours(0, 0, 0, 0);
-  const daysUntilThursday = (4 - today.getDay() + 7) % 7;
-  today.setDate(today.getDate() + daysUntilThursday);
-  return today;
+  // en-CA formats as YYYY-MM-DD — the calendar date in the group's timezone.
+  const localDate = new Intl.DateTimeFormat('en-CA', { timeZone: GROUP_TZ }).format(now);
+  // Pin to noon UTC so the weekday is unambiguous and DST can't shift it.
+  const d = new Date(`${localDate}T12:00:00Z`);
+  const daysUntilThursday = (4 - d.getUTCDay() + 7) % 7;
+  d.setUTCDate(d.getUTCDate() + daysUntilThursday);
+  return d;
 }
 
 function bookApiPath(book: string): string {
@@ -38,7 +42,7 @@ async function fetchChapter(book: string, chapter: number) {
 function findUpcomingReading(meetings: Meeting[], from: Date): Meeting | null {
   for (let i = 0; i < 5; i++) {
     const target = new Date(from);
-    target.setDate(target.getDate() + i * 7);
+    target.setUTCDate(target.getUTCDate() + i * 7);
     const dateStr = target.toISOString().slice(0, 10);
     const m = meetings.find((meeting) => meeting.date === dateStr);
     if (m && m.topicType === 'reading' && m.book && typeof m.chapter === 'number') {
