@@ -103,17 +103,9 @@ async function loadAmplifyUser(): Promise<AuthUser | null> {
 
 async function amplifyLogin(email: string, password: string): Promise<AuthUser> {
   const { signIn } = await import('aws-amplify/auth');
-  try {
-    const result = await signIn({ username: email, password });
-    if (!result.isSignedIn) {
-      throw new Error(`Additional sign-in step required: ${result.nextStep.signInStep}`);
-    }
-  } catch (e) {
-    // Cognito throws UserNotConfirmedException while a user is awaiting admin approval.
-    if (e && typeof e === 'object' && 'name' in e && e.name === 'UserNotConfirmedException') {
-      throw new Error('Account not yet approved by admin');
-    }
-    throw e;
+  const result = await signIn({ username: email, password });
+  if (!result.isSignedIn) {
+    throw new Error(`Additional sign-in step required: ${result.nextStep.signInStep}`);
   }
   const u = await loadAmplifyUser();
   if (!u) throw new Error('Signed in, but session could not be loaded');

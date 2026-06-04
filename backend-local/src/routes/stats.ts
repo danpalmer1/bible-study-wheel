@@ -13,17 +13,29 @@ router.get('/', (_req, res) => {
       ? null
       : [...meetingsWithPick].sort((a, b) => b.date.localeCompare(a.date))[0];
 
+  // 1-meeting cooldown: whoever was picked at a meeting sits out the *next*
+  // meeting's wheel. Map each meeting to the previous meeting's pick so we can
+  // tell, per meeting, who was present-but-not-eligible.
+  const chronological = [...db.meetings].sort((a, b) => a.date.localeCompare(b.date));
+  const prevPickByMeetingId = new Map<string, string | null>();
+  chronological.forEach((m, i) => {
+    prevPickByMeetingId.set(m.meetingId, i > 0 ? chronological[i - 1].selectedAttendeeId ?? null : null);
+  });
+
   const attendees = db.attendees.map((a) => {
-    const meetingsAttended = db.meetings.filter((m) => m.attendeeIds.includes(a.attendeeId)).length;
+    const attended = db.meetings.filter((m) => m.attendeeIds.includes(a.attendeeId));
+    const meetingsAttended = attended.length;
+    // On the wheel that meeting unless they were the previous meeting's pick.
+    const timesEligible = attended.filter(
+      (m) => prevPickByMeetingId.get(m.meetingId) !== a.attendeeId
+    ).length;
     const timesSelected = meetingsWithPick.filter((m) => m.selectedAttendeeId === a.attendeeId).length;
     return {
       attendeeId: a.attendeeId,
       name: a.name,
       active: a.active,
       meetingsAttended,
-      // Pick rate denominator: every attendee at a meeting is on the wheel,
-      // so eligibility collapses to attendance in the new (stateless-wheel) model.
-      timesEligible: meetingsAttended,
+      timesEligible,
       timesSelected,
       isLastSelected: lastPick?.selectedAttendeeId === a.attendeeId,
     };

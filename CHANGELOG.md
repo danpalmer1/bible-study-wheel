@@ -9,6 +9,19 @@ Versioning is loose pre-1.0 — minor versions may include breaking changes.
 
 _Add new entries here as work lands; promote to a versioned section when shipping._
 
+### Changed — Wheel + stats honor a 1-meeting prayer cooldown
+- Whoever was picked at the most recent meeting now starts **off** the public wheel, so nobody prays two meetings in a row. `frontend/src/pages/WheelPage.tsx` reads `stats.lastPick` on load, excludes that attendee from the default selection (unchecked + disabled via `disabledIds`), and shows a caption naming who's sitting out.
+- Stats `timesEligible` ("On wheel") is no longer a copy of `meetingsAttended`. It now excludes the meeting **immediately after** a person was picked — `timesEligible = meetings attended where they were not the chronologically-previous meeting's pick`. This makes "On wheel" diverge from "Meetings" and turns Pick rate into picked ÷ actually-eligible. Mirrored in `backend-local/src/routes/stats.ts` and `backend-aws/functions/stats/index.js`; `StatsPage.tsx` column tooltip + footer copy updated. Reverses the v0.5.0 "eligibility collapses to attendance" simplification using the meeting log's `selectedAttendeeId` (no `Spins` table resurrected).
+
+### Fixed — Upcoming-meetings outlook rolls forward the day after a meeting
+- `frontend/src/pages/AdminPage.tsx` — the `Upcoming meetings` planner anchored its 4-week window on `currentThursday()` (rounds **down** to the current week's Thursday), so a meeting that already happened lingered in the outlook until the next Thursday. Switched to `nextThursday()` (rounds up; matches the verse route), so e.g. on Wed Jun 3 the window is Jun 4 / 11 / 18 / 25 instead of May 28 / Jun 4 / 11 / 18. Also realigns the planner with the verse banner's week, the likely cause of the "banner shows previous week's reading" report.
+
+### Fixed — Production hardening (full-codebase review)
+- **Delete a meeting from the admin UI.** `AdminPage` "Recent meetings" rows gain a Delete button (wired to the existing `DELETE /meetings/:id`), so a mistyped date or duplicate can be removed instead of polluting stats and the cooldown forever.
+- **A wheel pick must be a present attendee — enforced server-side.** `backend-aws/functions/meetings/index.js` and `backend-local/src/routes/meetings.ts` now reject `selectedAttendeeId` not in `attendeeIds` (the frontend already constrained it; this closes the API gap).
+- **Verse banner rolls over at the group's midnight, not UTC.** The verse Lambda + local route compute the week's Thursday in `GROUP_TZ` (default `America/Chicago`) via `Intl.DateTimeFormat`, instead of the server's UTC clock — so the reading no longer changes up to a day early/late for a US-based group. Set the `GROUP_TZ` env var to relocate.
+- Cleanup: removed the dead `UserNotConfirmedException` → "awaiting admin approval" mapping in `AuthContext` (signup is retired; users are always confirmed); the nav brand logo now respects the mid-spin lock like the other nav links.
+
 ### Removed — Retire the signup / member system
 - Self-registration is gone end-to-end. With the wheel and stats both public, a member account granted nothing, so the entire signup/approval/linking surface is deleted.
 - Frontend: removed `Signup.tsx` + the `/signup` route, the public Login/Sign up nav buttons, `AuthContext.signup`/`amplifySignup`, the Admin → Pending users tab, and the attendee→user link + promote-to-admin UI. The login route is now the unlisted `/admin-login` (no nav entry; `ProtectedRoute` and logout redirect there). `PendingUser`, `ApprovedUser`, and `Attendee.userId` dropped from `api/client.ts`.
