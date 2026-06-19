@@ -11,9 +11,6 @@ import { useSpinLock } from '../spin/SpinLockContext';
 export default function WheelPage() {
   const [attendees, setAttendees] = useState<Attendee[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  // Winners are removed from the pool for the session and can't be re-added
-  // until reload, so a spin never lands on the same person twice.
-  const [spunIds, setSpunIds] = useState<Set<string>>(new Set());
   // The most recent meeting's pick — excluded from the wheel for one meeting.
   const [lastPickId, setLastPickId] = useState<string | null>(null);
   // Spin state is shared via context so Nav can lock navigation mid-spin.
@@ -49,14 +46,14 @@ export default function WheelPage() {
     [attendees, selectedIds]
   );
 
-  // Attendees the user is actually allowed to pick: active, not already spun,
-  // and not last meeting's pick. The select-all toggle operates on exactly these.
+  // Attendees the user is allowed to pick: everyone except last meeting's pick.
+  // The select-all toggle operates on exactly these.
   const selectableIds = useMemo(
     () =>
       attendees
-        .filter((a) => !spunIds.has(a.attendeeId) && a.attendeeId !== lastPickId)
+        .filter((a) => a.attendeeId !== lastPickId)
         .map((a) => a.attendeeId),
-    [attendees, spunIds, lastPickId]
+    [attendees, lastPickId]
   );
   const allSelected =
     selectableIds.length > 0 && selectableIds.every((id) => selectedIds.has(id));
@@ -72,17 +69,11 @@ export default function WheelPage() {
   };
 
   const onStopSpinning = () => {
-    const winner = eligibleAttendees[winnerIndex] ?? null;
+    // Leave the wheel exactly as it landed: the winner stays in the pool, so the
+    // configuration doesn't change. Exclusion is driven only by the backend's
+    // last-meeting pick.
+    setResult(eligibleAttendees[winnerIndex] ?? null);
     setSpinning(false);
-    setResult(winner);
-    if (winner) {
-      setSpunIds((prev) => new Set(prev).add(winner.attendeeId));
-      setSelectedIds((prev) => {
-        const next = new Set(prev);
-        next.delete(winner.attendeeId);
-        return next;
-      });
-    }
   };
 
   if (loading) return <p className="text-woodland-muted">Loading…</p>;
@@ -105,7 +96,7 @@ export default function WheelPage() {
           attendees={attendees}
           selectedIds={selectedIds}
           onChange={setSelectedIds}
-          disabledIds={Array.from(spunIds).concat(lastPickId ? [lastPickId] : [])}
+          disabledIds={lastPickId ? [lastPickId] : []}
           disabled={spinning}
         />
         {lastPickId && attendees.some((a) => a.attendeeId === lastPickId) && (
